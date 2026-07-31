@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    APP_NAME: str = "ClothingEcommerce"
+    APP_NAME: str = "Royal Wool"
     ENV: str = "development"
 
     MONGO_URI: str = "mongodb://localhost:27017"
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     # Public base URL of this backend — used to build absolute URLs for push
     # notification images (FCM needs a reachable URL, not a local asset).
-    PUBLIC_BASE_URL: str = "https://clothingecommerce-backend.onrender.com"
+    PUBLIC_BASE_URL: str = "https://royal-wool-backend.onrender.com"
 
     # AI recommendations (Groq — OpenAI-compatible). Empty key => heuristic only.
     GROQ_API_KEY: str = ""
