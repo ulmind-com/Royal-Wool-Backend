@@ -1,18 +1,20 @@
 from pydantic import BaseModel, Field
 
 
-class DeliverySlab(BaseModel):
-    up_to_km: float          # applies up to this distance
-    fee: float               # flat fee for this slab
-
-
 class DeliveryConfig(BaseModel):
-    free_radius_km: float = 3          # free within this radius
-    per_km_rate: float = 8             # charge per km beyond free radius (if no slabs)
-    base_fee: float = 0                # base fee beyond free radius
+    # Free delivery threshold
     free_above: float = 0              # order subtotal for free delivery (0 = off)
-    max_service_km: float = 30         # not deliverable beyond this
-    slabs: list[DeliverySlab] = []     # optional slab-based pricing (overrides per_km)
+    
+    # Home State Pricing
+    home_state: str = "West Bengal"
+    home_base_fee: float = 65          # flat fee for up to base_weight_kg
+    home_base_weight_kg: float = 1     # usually 1kg
+    home_extra_fee_per_kg: float = 0   # charge per extra kg above base weight
+    
+    # Rest of India Pricing
+    rest_base_fee: float = 100         # flat fee for up to base_weight_kg
+    rest_base_weight_kg: float = 1
+    rest_extra_fee_per_kg: float = 0
 
 
 class CodConfig(BaseModel):

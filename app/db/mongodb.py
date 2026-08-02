@@ -11,9 +11,14 @@ class _DB:
 _state = _DB()
 
 
+import logging
+
+logger = logging.getLogger("uvicorn.error")
+
 async def connect_to_mongo() -> None:
     _state.client = AsyncIOMotorClient(settings.MONGO_URI)
     _state.db = _state.client[settings.MONGO_DB]
+    logger.info(f"✅ Successfully connected to MongoDB database: {settings.MONGO_DB}")
     await _ensure_indexes()
 
 
@@ -32,6 +37,7 @@ async def _ensure_indexes() -> None:
     await db.users.create_index("email", unique=True)
     await db.categories.create_index("slug", unique=True)
     await db.categories.create_index("parent_id")
+    await db.brands.create_index("slug", unique=True)
     await db.products.create_index([("title", "text"), ("description", "text")])
     await db.products.create_index("category_id")
     await db.orders.create_index("user_id")

@@ -14,7 +14,6 @@ from app.services.pricing import (
     compute_delivery,
     coupon_discount,
     get_settings,
-    haversine_km,
     resolve_price,
 )
 
@@ -36,6 +35,7 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
     order_items = []
     lines = []  # (line_total, {cgst, sgst, igst})
     subtotal = 0.0
+    total_weight_grams = 0.0
     for it in items_in:
         prod = await db.products.find_one({"_id": to_object_id(it.product_id)})
         if not prod or not prod.get("is_active", True):
@@ -44,6 +44,7 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
         unit = resolve_price(prod, it.color, it.size)["final_price"]
         line_total = unit * it.qty
         subtotal += line_total
+        total_weight_grams += float(prod.get("shipping_weight") or 0) * it.qty
         comp = {
             "cgst": float(prod.get("cgst") or 0),
             "sgst": float(prod.get("sgst") or 0),
@@ -65,21 +66,20 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
             }
         )
 
-    # Coupon lookup is user-aware so a first-order-only coupon can't be used by
-    # a returning customer (see get_coupon).
     coupon_doc = await get_coupon(db, coupon, user_id)
     discount = coupon_discount(coupon_doc, subtotal) if coupon_doc else 0.0
 
-    # distance-based delivery
-    distance = None
-    if settings.shop.lat is not None and address.lat is not None:
-        distance = haversine_km(settings.shop.lat, settings.shop.lng, address.lat, address.lng)
-    deliv = compute_delivery(settings, subtotal - discount, distance)
+    dest_state = getattr(address, "state", "") or ""
+    deliv = compute_delivery(settings, subtotal - discount, dest_state, total_weight_grams)
+
+    if coupon_doc and coupon_doc.get("free_shipping"):
+        deliv["fee"] = 0.0
+        deliv["free"] = True
 
     # Same-state order -> CGST + SGST from the product; different state -> IGST.
     shop_state = (settings.shop.state or "").strip().lower()
-    dest_state = (getattr(address, "state", "") or "").strip().lower()
-    interstate = bool(shop_state and dest_state and shop_state != dest_state)
+    dest_state_lower = dest_state.strip().lower()
+    interstate = bool(shop_state and dest_state_lower and shop_state != dest_state_lower)
 
     total_cgst = total_sgst = total_igst = 0.0
     tax_items = []
@@ -228,6 +228,8 @@ async def create_order(body: OrderCreate, user: dict = Depends(get_current_user)
 
     if is_cod:
         await _decrement_stock(db, order_items)
+        if body.coupon_code:
+            await db.coupons.update_one({"code": body.coupon_code.strip().upper()}, {"$inc": {"used_count": 1}})
         await notifications.notify_users(db, [user["id"]], "Order placed 🎉",
                                          "Your COD order is confirmed.",
                                          {"type": "order", "order_id": our_id}, kind="order")
@@ -277,6 +279,8 @@ async def verify_order(body: OrderVerify, user: dict = Depends(get_current_user)
                   "paid_at": datetime.now(timezone.utc)}},
     )
     await _decrement_stock(db, order["items"])
+    if order.get("coupon_code"):
+        await db.coupons.update_one({"code": order["coupon_code"].strip().upper()}, {"$inc": {"used_count": 1}})
     await notifications.notify_users(db, [user["id"]], "Payment successful 🎉",
                                      "Your order is confirmed.",
                                      {"type": "order", "order_id": body.order_id}, kind="order")
@@ -334,6 +338,8 @@ async def cancel_order(order_id: str, user: dict = Depends(get_current_user)):
     # Stock was only decremented once the order was confirmed (COD or paid).
     if order["status"] == "confirmed":
         await _restore_stock(db, order["items"])
+        if order.get("coupon_code"):
+            await db.coupons.update_one({"code": order["coupon_code"].strip().upper()}, {"$inc": {"used_count": -1}})
 
     msg = "Your order has been cancelled."
     if refunded:

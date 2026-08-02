@@ -9,6 +9,7 @@ from app.db.mongodb import close_mongo_connection, connect_to_mongo, get_db
 from app.routers import (
     auth,
     banners,
+    brands,
     categories,
     chat,
     coupons,
@@ -16,6 +17,9 @@ from app.routers import (
     notifications as notifications_router,
     orders,
     products,
+    product_lines,
+    certifications,
+    countries,
     recommendations,
     returns,
     reviews,
@@ -60,10 +64,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+import time
+import logging
+from fastapi import Request
+
+logger = logging.getLogger("uvicorn.error")
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    
+    # Don't clutter logs with static files or health checks if you prefer
+    if not request.url.path.startswith("/static"):
+        logger.info(f"🌐 [{request.method}] {request.url.path} - Status: {response.status_code} - {process_time * 1000:.1f}ms")
+    
+    return response
+
 app.include_router(auth.router)
+app.include_router(brands.router)
 app.include_router(categories.router)
 app.include_router(products.router)
+app.include_router(product_lines.router)
+app.include_router(certifications.router)
+app.include_router(countries.router)
 app.include_router(orders.router)
+app.include_router(recommendations.router)
 app.include_router(wishlist.router)
 app.include_router(reviews.router)
 app.include_router(coupons.router)

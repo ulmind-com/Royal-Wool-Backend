@@ -97,9 +97,9 @@ def product_final_price(product: dict) -> dict:
     return {"final_price": final, "struck_price": struck, "off_pct": off}
 
 
-def _variant_params(product: dict, color=None, size=None) -> tuple:
-    """Resolve (price, mrp, discount_pct, discount_on) for a colour+size.
-    Fallback order for every field: size -> colour -> product base."""
+def _variant_params(product: dict, color=None, dye_lot=None) -> tuple:
+    """Resolve (price, mrp, discount_pct, discount_on) for a colour+dye_lot.
+    Fallback order for every field: dye_lot -> colour -> product base."""
     price = product.get("price") or 0
     mrp = product.get("mrp") or 0
     disc = product.get("discount_pct") or 0
@@ -114,38 +114,38 @@ def _variant_params(product: dict, color=None, size=None) -> tuple:
                 disc = c["discount_pct"]
             if c.get("discount_on"):
                 on = c["discount_on"]
-            for ss in (c.get("sizes") or []):
-                if ss.get("size") == size:
-                    if ss.get("price") is not None:
-                        price = ss["price"]
-                    if ss.get("mrp") is not None:
-                        mrp = ss["mrp"]
-                    if ss.get("discount_pct") is not None:
-                        disc = ss["discount_pct"]
-                    if ss.get("discount_on"):
-                        on = ss["discount_on"]
+            for dl in (c.get("dye_lots") or []):
+                if dl.get("dye_lot") == dye_lot:
+                    if dl.get("price") is not None:
+                        price = dl["price"]
+                    if dl.get("mrp") is not None:
+                        mrp = dl["mrp"]
+                    if dl.get("discount_pct") is not None:
+                        disc = dl["discount_pct"]
+                    if dl.get("discount_on"):
+                        on = dl["discount_on"]
                     break
             break
     return price, mrp, disc, on
 
 
-def resolve_price(product: dict, color=None, size=None) -> dict:
-    """Display pricing for a specific colour + size selection."""
-    price, mrp, disc, on = _variant_params(product, color, size)
+def resolve_price(product: dict, color=None, dye_lot=None) -> dict:
+    """Display pricing for a specific colour + dye_lot selection."""
+    price, mrp, disc, on = _variant_params(product, color, dye_lot)
     final, struck, off = _apply(mrp, price, disc, on)
     return {"final_price": final, "struck_price": struck, "off_pct": off}
 
 
 def _combos(product: dict) -> list[tuple]:
-    """(final, struck, off) for every colour+size combination."""
+    """(final, struck, off) for every colour+dye_lot combination."""
     out = []
     colors = [c for c in (product.get("colors") or []) if isinstance(c, dict)]
     if colors:
         for c in colors:
-            sizes = c.get("sizes") or []
-            targets = [s.get("size") for s in sizes] if sizes else [None]
-            for sz in targets:
-                p, m, d, o = _variant_params(product, c.get("name"), sz)
+            dye_lots = c.get("dye_lots") or []
+            targets = [dl.get("dye_lot") for dl in dye_lots] if dye_lots else [None]
+            for dl in targets:
+                p, m, d, o = _variant_params(product, c.get("name"), dl)
                 out.append(_apply(m, p, d, o))
     else:
         p, m, d, o = _variant_params(product, None, None)
@@ -170,14 +170,14 @@ def price_span(product: dict) -> dict:
     }
 
 
-def variant_stock(product: dict, color=None, size=None) -> int:
+def variant_stock(product: dict, color=None, dye_lot=None) -> int:
     for c in (product.get("colors") or []):
         if isinstance(c, dict) and c.get("name") == color:
-            sizes = c.get("sizes") or []
-            if sizes:
-                for ss in sizes:
-                    if ss.get("size") == size:
-                        return int(ss.get("stock", 0))
+            dye_lots = c.get("dye_lots") or []
+            if dye_lots:
+                for dl in dye_lots:
+                    if dl.get("dye_lot") == dye_lot:
+                        return int(dl.get("stock", 0))
                 return 0
             return int(c.get("stock", 0))
     return int(product.get("stock", 0))
@@ -188,48 +188,40 @@ def total_stock(product: dict) -> int:
     if colors:
         s = 0
         for c in colors:
-            sizes = c.get("sizes") or []
-            s += sum(int(x.get("stock", 0)) for x in sizes) if sizes else int(c.get("stock", 0))
+            dye_lots = c.get("dye_lots") or []
+            s += sum(int(x.get("stock", 0)) for x in dye_lots) if dye_lots else int(c.get("stock", 0))
         return s
     return int(product.get("stock", 0))
 
 
-def compute_delivery(settings: Settings, subtotal: float, distance_km: float | None) -> dict:
+def compute_delivery(settings: Settings, subtotal: float, dest_state: str, total_weight_grams: float) -> dict:
     """Return {fee, distance_km, deliverable, free}.
-
-    Precedence matters: the max serviceable distance is checked BEFORE any
-    free-delivery rule, so an address outside the service area is never marked
-    deliverable/free just because the order crossed the free-above threshold.
-    Distance is always rounded to one decimal for display.
+    Computes Pan-India weight-based delivery fees relying on state.
     """
     d = settings.delivery
-    dist = round(distance_km, 1) if distance_km is not None else None
+    weight_kg = total_weight_grams / 1000.0 if total_weight_grams else 0
 
-    # 1. Outside the serviceable area -> not deliverable (0 = no limit).
-    if dist is not None and d.max_service_km and dist > d.max_service_km:
-        return {"fee": 0.0, "distance_km": dist, "deliverable": False, "free": False}
-
-    # 2. Free delivery above an order-value threshold.
     if d.free_above and subtotal >= d.free_above:
-        return {"fee": 0.0, "distance_km": dist, "deliverable": True, "free": True}
+        return {"fee": 0.0, "distance_km": None, "deliverable": True, "free": True}
 
-    # 3. No coordinates -> base fee fallback.
-    if dist is None:
-        return {"fee": round(d.base_fee, 2), "distance_km": None, "deliverable": True, "free": d.base_fee == 0}
+    is_home = False
+    if dest_state and d.home_state and dest_state.strip().lower() == d.home_state.strip().lower():
+        is_home = True
 
-    # 4. Within the free radius.
-    if dist <= d.free_radius_km:
-        return {"fee": 0.0, "distance_km": dist, "deliverable": True, "free": True}
+    if is_home:
+        base_fee = d.home_base_fee
+        base_weight = d.home_base_weight_kg
+        extra_fee = d.home_extra_fee_per_kg
+    else:
+        base_fee = d.rest_base_fee
+        base_weight = d.rest_base_weight_kg
+        extra_fee = d.rest_extra_fee_per_kg
 
-    # 5. Slab-based pricing (overrides per-km when configured).
-    if d.slabs:
-        for slab in sorted(d.slabs, key=lambda s: s.up_to_km):
-            if dist <= slab.up_to_km:
-                return {"fee": round(slab.fee, 2), "distance_km": dist, "deliverable": True, "free": slab.fee == 0}
-        last = max(d.slabs, key=lambda s: s.up_to_km)
-        return {"fee": round(last.fee, 2), "distance_km": dist, "deliverable": True, "free": last.fee == 0}
+    fee = base_fee
+    if weight_kg > base_weight:
+        # Couriers usually charge for every additional full or partial kg.
+        # math.ceil handles partial kg as a full unit.
+        extra_kg = math.ceil(weight_kg - base_weight)
+        fee += extra_kg * extra_fee
 
-    # 6. Beyond the free radius -> base fee + per-km on the FULL distance
-    #    (the free radius only decides free-vs-paid, it is NOT subtracted).
-    fee = d.base_fee + dist * d.per_km_rate
-    return {"fee": round(fee, 2), "distance_km": dist, "deliverable": True, "free": fee == 0}
+    return {"fee": round(fee, 2), "distance_km": None, "deliverable": True, "free": fee == 0}

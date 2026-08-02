@@ -34,6 +34,9 @@ class CouponIn(BaseModel):
     max_discount: float = 0        # 0 = no cap (percent only)
     active: bool = True
     first_order_only: bool = False  # usable only on the customer's first order
+    free_shipping: bool = False     # grants free shipping regardless of distance
+    usage_limit: int = 0            # 0 = unlimited total uses
+    limit_per_user: int = 0         # 0 = unlimited per user
     valid_from: str | None = None   # ISO datetime — coupon starts showing/working
     valid_until: str | None = None  # ISO datetime — auto-expires after this
     description: str = ""
@@ -71,6 +74,21 @@ async def get_coupon(db, code: str, user_id: str | None = None):
         return None
     if c.get("first_order_only") and not await is_first_order(db, user_id):
         return None
+        
+    usage_limit = c.get("usage_limit", 0)
+    if usage_limit > 0 and c.get("used_count", 0) >= usage_limit:
+        return None
+        
+    limit_per_user = c.get("limit_per_user", 0)
+    if limit_per_user > 0 and user_id:
+        used_by_me = await db.orders.count_documents({
+            "user_id": user_id, 
+            "coupon_code": c["code"], 
+            "status": {"$in": ["placed", "confirmed", "shipped", "out_for_delivery", "delivered"]}
+        })
+        if used_by_me >= limit_per_user:
+            return None
+            
     return c
 
 
@@ -107,6 +125,7 @@ async def create_coupon(body: CouponIn):
     doc = body.model_dump()
     doc["code"] = code
     doc["created_at"] = datetime.now(timezone.utc)
+    doc["used_count"] = 0
     res = await db.coupons.insert_one(doc)
     doc["_id"] = res.inserted_id
 
@@ -217,9 +236,13 @@ async def validate_coupon(
             "message": f"Minimum order ₹{coupon['min_order']:.0f} required",
         }
     discount = coupon_discount(coupon, subtotal)
+    msg = f"You saved ₹{discount:.0f}!" if discount > 0 else "Coupon applied!"
+    if coupon.get("free_shipping"):
+        msg = f"Free Shipping + ₹{discount:.0f} off!" if discount > 0 else "Free Shipping applied!"
     return {
         "valid": True,
         "discount": discount,
         "code": coupon["code"],
-        "message": f"You saved ₹{discount:.0f}!",
+        "free_shipping": bool(coupon.get("free_shipping")),
+        "message": msg,
     }
