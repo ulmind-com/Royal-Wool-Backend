@@ -36,6 +36,8 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
     lines = []  # (line_total, {cgst, sgst, igst})
     subtotal = 0.0
     total_weight_grams = 0.0
+    cart_state = []
+
     for it in items_in:
         prod = await db.products.find_one({"_id": to_object_id(it.product_id)})
         if not prod or not prod.get("is_active", True):
@@ -50,24 +52,104 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
             "sgst": float(prod.get("sgst") or 0),
             "igst": float(prod.get("igst") or 0),
         }
-        lines.append((line_total, comp))
+        
+        cart_state.append({
+            "product_id": it.product_id,
+            "unit": unit,
+            "qty": it.qty,
+            "it": it,
+            "prod": prod,
+            "comp": comp,
+            "unbundled_qty": it.qty,
+            "line_total": line_total
+        })
+
+    combo_discount = 0.0
+    now = datetime.now(timezone.utc)
+    combos = await db.combos.find({"active": True}).to_list(100)
+    for combo in combos:
+        # Time validity check
+        start_date = combo.get("start_date")
+        if start_date and start_date.tzinfo is None:
+            start_date = start_date.replace(tzinfo=timezone.utc)
+        if start_date and now < start_date:
+            continue
+            
+        end_date = combo.get("end_date")
+        if end_date and end_date.tzinfo is None:
+            end_date = end_date.replace(tzinfo=timezone.utc)
+        if end_date and now > end_date:
+            continue
+
+        available_units = []
+        for state in cart_state:
+            is_eligible = False
+            if str(state["product_id"]) in combo.get("product_ids", []):
+                is_eligible = True
+            elif combo.get("weight_target") is not None:
+                try:
+                    if state["prod"].get("skein_weight") is not None and float(state["prod"]["skein_weight"]) == float(combo["weight_target"]):
+                        is_eligible = True
+                except (ValueError, TypeError):
+                    pass
+            
+            if is_eligible and state["unbundled_qty"] > 0:
+                available_units.extend([(state["unit"], state)] * state["unbundled_qty"])
+                    
+        available_units.sort(key=lambda x: x[0], reverse=True)
+        num_bundles = len(available_units) // combo.get("qty", 1)
+        
+        if num_bundles > 0:
+            items_to_bundle = num_bundles * combo["qty"]
+            regular_price_of_bundled = sum(u[0] for u in available_units[:items_to_bundle])
+            bundle_price_total = num_bundles * combo["price"]
+            
+            discount_for_this_combo = regular_price_of_bundled - bundle_price_total
+            if discount_for_this_combo > 0:
+                combo_discount += discount_for_this_combo
+                
+                # Deduct these units from unbundled_qty
+                sorted_state = sorted(cart_state, key=lambda x: x["unit"], reverse=True)
+                units_to_remove = items_to_bundle
+                for state in sorted_state:
+                    is_eligible = False
+                    if str(state["product_id"]) in combo.get("product_ids", []):
+                        is_eligible = True
+                    elif combo.get("weight_target") is not None:
+                        try:
+                            if state["prod"].get("skein_weight") is not None and float(state["prod"]["skein_weight"]) == float(combo["weight_target"]):
+                                is_eligible = True
+                        except (ValueError, TypeError):
+                            pass
+                    
+                    if is_eligible:
+                        take = min(state["unbundled_qty"], units_to_remove)
+                        state["unbundled_qty"] -= take
+                        units_to_remove -= take
+                        if units_to_remove == 0:
+                            break
+
+    for state in cart_state:
+        lines.append((state["line_total"], state["comp"]))
         order_items.append(
             {
-                "product_id": it.product_id,
-                "title": prod["title"],
-                "price": unit,
-                "qty": it.qty,
-                "color": it.color,
-                "size": it.size,
-                "cgst": comp["cgst"],
-                "sgst": comp["sgst"],
-                "igst": comp["igst"],
-                "image": (prod.get("images") or [None])[0],
+                "product_id": state["it"].product_id,
+                "title": state["prod"]["title"],
+                "price": state["unit"],
+                "qty": state["it"].qty,
+                "color": state["it"].color,
+                "size": state["it"].size,
+                "cgst": state["comp"]["cgst"],
+                "sgst": state["comp"]["sgst"],
+                "igst": state["comp"]["igst"],
+                "image": (state["prod"].get("images") or [None])[0],
             }
         )
 
     coupon_doc = await get_coupon(db, coupon, user_id)
-    discount = coupon_discount(coupon_doc, subtotal) if coupon_doc else 0.0
+    # The coupon discount is calculated on the subtotal.
+    # The final discount is coupon_discount + combo_discount
+    discount = (coupon_discount(coupon_doc, subtotal) if coupon_doc else 0.0) + combo_discount
 
     dest_state = getattr(address, "state", "") or ""
     deliv = compute_delivery(settings, subtotal - discount, dest_state, total_weight_grams)

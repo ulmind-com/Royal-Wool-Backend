@@ -67,7 +67,7 @@ async def _system_prompt(db, user: dict, order_id: str | None) -> str:
     human = " or ".join(contact) if contact else "our support line"
 
     lines = [
-        "You are 'Cleo', the customer-support assistant for the Clothing store (a fashion e-commerce app).",
+        "You are 'Cleo', the customer-support assistant for Royaall Wool (a premium yarn and knitting supplies e-commerce app).",
         "Help with orders, tracking, cancellations, returns/refunds, delivery, payments and offers. Be concise, warm and clear (2-5 sentences).",
         f"Currency: {s.currency}. Payments: Cash on Delivery, or online UPI/Card/Netbanking (Razorpay).",
         f"To reach a human, tell the customer to {human}.",

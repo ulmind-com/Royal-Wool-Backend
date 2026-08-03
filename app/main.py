@@ -12,6 +12,7 @@ from app.routers import (
     brands,
     categories,
     chat,
+    combos,
     coupons,
     home_sections,
     notifications as notifications_router,
@@ -85,15 +86,16 @@ async def log_requests(request: Request, call_next):
 app.include_router(auth.router)
 app.include_router(brands.router)
 app.include_router(categories.router)
-app.include_router(products.router)
-app.include_router(product_lines.router)
+app.include_router(combos.router)
+app.include_router(coupons.router)
 app.include_router(certifications.router)
 app.include_router(countries.router)
 app.include_router(orders.router)
+app.include_router(products.router)
+app.include_router(product_lines.router)
 app.include_router(recommendations.router)
 app.include_router(wishlist.router)
 app.include_router(reviews.router)
-app.include_router(coupons.router)
 app.include_router(banners.router)
 app.include_router(settings_router.router)
 app.include_router(users.router)

@@ -1,10 +1,10 @@
-import urllib.request
-import json
+from fastapi.testclient import TestClient
+from app.main import app
 
-try:
-    req = urllib.request.Request("http://127.0.0.1:8000/products/brands")
-    with urllib.request.urlopen(req) as response:
-        print("Status:", response.status)
-        print("Body:", response.read().decode())
-except Exception as e:
-    print(e)
+client = TestClient(app)
+res = client.get("/products?admin=true&limit=100")
+print(res.status_code)
+if res.status_code != 200:
+    print(res.json())
+else:
+    print(len(res.json()), "products returned")

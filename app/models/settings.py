@@ -28,7 +28,7 @@ class CodConfig(BaseModel):
 
 
 class ShopConfig(BaseModel):
-    name: str = "Clothing Store"
+    name: str = "Royaall Wool"
     address: str = ""
     phone: str = ""
     email: str = ""          # support email surfaced to customers (chat, help)

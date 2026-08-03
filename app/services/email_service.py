@@ -72,7 +72,7 @@ def _otp_html(code: str, ttl_minutes: int) -> str:
             </p>
           </td></tr>
         </table>
-        <p style="margin:16px 0 0;color:#b5b5ba;font-size:11px;">Clothing · this is an automated message</p>
+        <p style="margin:16px 0 0;color:#b5b5ba;font-size:11px;">Royaall Wool · this is an automated message</p>
       </td></tr>
     </table>
   </body>

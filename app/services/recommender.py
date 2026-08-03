@@ -84,7 +84,7 @@ async def rerank(
 
     valid = {c["id"] for c in candidates}
     system = (
-        "You are the recommendation engine for a fashion & clothing e-commerce app. "
+        "You are the recommendation engine for a premium yarn & knitting supplies e-commerce app (Royaall Wool). "
         "Given a shopper's context and a list of candidate products, rank the products "
         "by how relevant they are to the shopper, most relevant first. Prefer in-stock "
         "items, complementary categories, similar style/price, and popular picks. "
