@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.db.mongodb import close_mongo_connection, connect_to_mongo, get_db
 from app.routers import (
+    analytics,
     auth,
     banners,
     brands,
@@ -29,6 +30,7 @@ from app.routers import (
     site_media,
     upload,
     users,
+    waitlist,
     wishlist,
 )
 from app.services import notifications as notif_service
@@ -84,6 +86,7 @@ async def log_requests(request: Request, call_next):
     return response
 
 app.include_router(auth.router)
+app.include_router(analytics.router)
 app.include_router(brands.router)
 app.include_router(categories.router)
 app.include_router(combos.router)
@@ -107,6 +110,7 @@ app.include_router(notifications_router.router)
 app.include_router(chat.router)
 app.include_router(returns.router)
 app.include_router(site_media.router)
+app.include_router(waitlist.router)
 
 
 import os
