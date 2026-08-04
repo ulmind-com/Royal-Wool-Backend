@@ -31,13 +31,18 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _public(doc: dict) -> UserPublic:
+    created_at_val = doc.get("created_at")
+    created_str = str(created_at_val) if created_at_val else None
     return UserPublic(
-        id=doc["id"],
-        name=doc["name"],
-        email=doc["email"],
+        id=str(doc["id"]) if "id" in doc else str(doc["_id"]),
+        name=doc.get("name", ""),
+        email=doc.get("email", ""),
         phone=doc.get("phone"),
         avatar=doc.get("avatar"),
         role=doc.get("role", "user"),
+        addresses=doc.get("addresses") or [],
+        cart=doc.get("cart") or [],
+        created_at=created_str,
     )
 
 
@@ -53,8 +58,11 @@ async def request_otp(body: OtpRequest):
     """Step 1 of signup: email a 6-digit verification code (rate-limited)."""
     db = get_db()
     email = body.email.lower()
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=409, detail="Email already registered. Please log in.")
+    existing_user = await db.users.find_one({"email": email})
+    if existing_user:
+        if existing_user.get("provider") == "google" or not existing_user.get("password"):
+            raise HTTPException(status_code=409, detail="You already have an account created with Google. Please click 'Continue with Google' below to log in!")
+        raise HTTPException(status_code=409, detail="Email is already registered. Please click 'Sign in' below to log in with your password.")
 
     now = datetime.now(timezone.utc)
     existing = await db.otps.find_one({"_id": email})
@@ -125,8 +133,11 @@ async def register(body: SignupComplete):
     except Exception:
         raise HTTPException(status_code=400, detail="Your verification expired. Please verify your email again.")
 
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=409, detail="Email already registered. Please log in.")
+    existing_user = await db.users.find_one({"email": email})
+    if existing_user:
+        if existing_user.get("provider") == "google" or not existing_user.get("password"):
+            raise HTTPException(status_code=409, detail="You already have an account created with Google. Please click 'Continue with Google' below to log in!")
+        raise HTTPException(status_code=409, detail="Email is already registered. Please log in.")
 
     doc = {
         "name": body.name.strip(),
@@ -157,6 +168,9 @@ async def register(body: SignupComplete):
 async def login(body: UserLogin):
     db = get_db()
     doc = await db.users.find_one({"email": body.email.lower()})
+    if doc and (doc.get("provider") == "google" or not doc.get("password")):
+        # User signed up via Google and has no password
+        raise HTTPException(status_code=400, detail="This account uses Google Sign-In. Please click 'Continue with Google' below to log in!")
     if not doc or not verify_password(body.password, doc.get("password", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     user = serialize(doc)
@@ -214,6 +228,70 @@ async def google_auth(id_token: str = Body(..., embed=True)):
             patch["google_sub"] = info.get("sub")
         if not doc.get("avatar") and info.get("picture"):
             patch["avatar"] = info.get("picture")
+        if patch:
+            await db.users.update_one({"_id": doc["_id"]}, {"$set": patch})
+            doc.update(patch)
+
+    user = serialize(doc)
+    token = create_access_token(user["id"], user.get("role", "user"))
+    return AuthResponse(access_token=token, user=_public(user))
+
+
+@router.post("/firebase", response_model=AuthResponse)
+async def firebase_auth(id_token: str = Body(..., embed=True)):
+    """Sign in with a Firebase ID token (from signInWithPopup on the web).
+
+    Uses firebase_admin to verify the token, then upserts the user in MongoDB
+    exactly like /auth/google. This is more reliable for web-based sign-in
+    because the Firebase SDK's signInWithPopup returns a Firebase ID token
+    whose audience is the Firebase project, not the Google OAuth Client ID.
+    """
+    from app.services.fcm_service import _ensure_app
+
+    if not _ensure_app():
+        raise HTTPException(status_code=500, detail="Firebase is not configured")
+
+    from firebase_admin import auth as fb_auth
+
+    try:
+        decoded = fb_auth.verify_id_token(id_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Firebase token")
+
+    email = (decoded.get("email") or "").lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Firebase account has no email")
+
+    db = get_db()
+    doc = await db.users.find_one({"email": email})
+    if not doc:
+        doc = {
+            "name": decoded.get("name") or email.split("@")[0],
+            "email": email,
+            "phone": None,
+            "password": None,
+            "role": "user",
+            "provider": "google",
+            "google_sub": decoded.get("sub"),
+            "avatar": decoded.get("picture"),
+            "addresses": [],
+            "fcm_tokens": [],
+            "email_verified": bool(decoded.get("email_verified")),
+            "created_at": datetime.now(timezone.utc),
+        }
+        res = await db.users.insert_one(doc)
+        doc["_id"] = res.inserted_id
+        await notifications.schedule(
+            db, str(doc["_id"]), "first_order_welcome", notifications.WELCOME_DELAY_MIN
+        )
+    else:
+        patch = {}
+        if not doc.get("provider"):
+            patch["provider"] = "google"
+        if not doc.get("google_sub"):
+            patch["google_sub"] = decoded.get("sub")
+        if not doc.get("avatar") and decoded.get("picture"):
+            patch["avatar"] = decoded.get("picture")
         if patch:
             await db.users.update_one({"_id": doc["_id"]}, {"$set": patch})
             doc.update(patch)
@@ -317,6 +395,10 @@ async def update_me(body: ProfileUpdate, user: dict = Depends(get_current_user))
         updates["phone"] = body.phone.strip() or None
     if body.avatar is not None:
         updates["avatar"] = body.avatar or None
+    if body.addresses is not None:
+        updates["addresses"] = body.addresses
+    if body.cart is not None:
+        updates["cart"] = body.cart
     if updates:
         await db.users.update_one({"_id": to_object_id(user["id"])}, {"$set": updates})
     doc = await db.users.find_one({"_id": to_object_id(user["id"])})

@@ -46,9 +46,10 @@ async def admin_all_users(q: str | None = None, limit: int = 500):
         query, {"password": 0}
     ).sort("created_at", -1).to_list(length=min(max(limit, 1), 2000))
 
-    # One aggregation for everyone's lifetime order stats (avoids N queries).
+    # One aggregation for everyone's lifetime order stats & recent orders.
     ids = [str(d["_id"]) for d in docs]
     stats: dict = {}
+    orders_map: dict = {}
     if ids:
         pipeline = [
             {"$match": {"user_id": {"$in": ids}, "status": {"$in": _REAL_ORDER}}},
@@ -56,6 +57,21 @@ async def admin_all_users(q: str | None = None, limit: int = 500):
         ]
         async for r in db.orders.aggregate(pipeline):
             stats[r["_id"]] = {"orders": r["orders"], "spent": round(r.get("spent") or 0, 2)}
+
+        # Also fetch latest orders for each user
+        recent_cur = await db.orders.find({"user_id": {"$in": ids}}).sort("created_at", -1).to_list(length=1000)
+        for ord_doc in recent_cur:
+            uid_key = ord_doc["user_id"]
+            if uid_key not in orders_map:
+                orders_map[uid_key] = []
+            if len(orders_map[uid_key]) < 5:
+                orders_map[uid_key].append({
+                    "id": str(ord_doc["_id"]),
+                    "status": ord_doc.get("status", "placed"),
+                    "amount": round(ord_doc.get("amount") or 0, 2),
+                    "created_at": str(ord_doc.get("created_at") or ""),
+                    "items_count": len(ord_doc.get("items") or []),
+                })
 
     out = []
     for d in docs:
@@ -73,6 +89,9 @@ async def admin_all_users(q: str | None = None, limit: int = 500):
             "cod_blocked": bool(d.get("cod_blocked", False)),
             "fcm_tokens": len(d.get("fcm_tokens") or []),
             "addresses": d.get("addresses") or [],
+            "cart_count": len(d.get("cart") or []),
+            "cart_items": d.get("cart") or [],
+            "recent_orders": orders_map.get(uid, []),
             "orders_count": st["orders"],
             "total_spent": st["spent"],
         })
