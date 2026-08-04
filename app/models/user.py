@@ -37,15 +37,21 @@ class UserPublic(BaseModel):
     phone: str | None = None
     avatar: str | None = None
     role: str = "user"
+    addresses: list = []
+    cart: list = []
+    created_at: str | None = None
 
 
 class ProfileUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=80)
     phone: str | None = None
     avatar: str | None = None
+    addresses: list | None = None
+    cart: list | None = None
 
 
 class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserPublic
+
