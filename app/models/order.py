@@ -33,3 +33,7 @@ class OrderVerify(BaseModel):
     razorpay_order_id: str
     razorpay_payment_id: str
     razorpay_signature: str
+
+class BulkStatusUpdate(BaseModel):
+    order_ids: list[str]
+    status: str

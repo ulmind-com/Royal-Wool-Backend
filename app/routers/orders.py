@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -6,7 +7,7 @@ from app.core.config import settings as app_settings
 from app.db.mongodb import get_db
 from app.deps import get_current_user, require_admin
 from app.models.common import serialize, to_object_id
-from app.models.order import OrderCreate, OrderVerify
+from app.models.order import OrderCreate, OrderVerify, BulkStatusUpdate
 from app.routers.coupons import get_coupon
 from app.services import notifications, razorpay_service
 from app.services.pricing import (
@@ -452,11 +453,61 @@ async def my_orders(user: dict = Depends(get_current_user)):
     return [serialize(d) for d in docs]
 
 
-@router.get("/admin/all", dependencies=[Depends(require_admin)])
-async def all_orders(status: str | None = None):
+@router.get("/admin/status-counts", dependencies=[Depends(require_admin)])
+async def admin_status_counts():
     db = get_db()
-    q = {"status": status} if status else {}
-    docs = await db.orders.find(q).sort("created_at", -1).to_list(length=500)
+    pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}}}]
+    results = await db.orders.aggregate(pipeline).to_list(length=None)
+    counts = {r["_id"]: r["count"] for r in results}
+    all_stages = STAGES + ["cancelled"]
+    return {s: counts.get(s, 0) for s in all_stages}
+
+
+@router.get("/admin/all", dependencies=[Depends(require_admin)])
+async def all_orders(
+    status: str | None = None,
+    q: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    user_id: str | None = None,
+    limit: int = 100
+):
+    db = get_db()
+    query = {}
+    
+    if user_id:
+        query["user_id"] = user_id
+
+    if status:
+        query["status"] = status
+        
+    if q:
+        q = q.strip()
+        search_val = q.lstrip("#")
+        query["$or"] = [
+            {"address.name": {"$regex": re.escape(search_val), "$options": "i"}},
+            {"address.phone": {"$regex": re.escape(search_val), "$options": "i"}},
+            {"$expr": {"$regexMatch": {"input": {"$toString": "$_id"}, "regex": re.escape(search_val), "options": "i"}}}
+        ]
+            
+    if start_date or end_date:
+        query["created_at"] = {}
+        if start_date:
+            try:
+                dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+                query["created_at"]["$gte"] = dt
+            except ValueError:
+                pass
+        if end_date:
+            try:
+                dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                query["created_at"]["$lte"] = dt
+            except ValueError:
+                pass
+        if not query["created_at"]:
+            del query["created_at"]
+
+    docs = await db.orders.find(query).sort("created_at", -1).to_list(length=limit)
     return [serialize(d) for d in docs]
 
 
@@ -539,12 +590,24 @@ async def get_order(order_id: str, user: dict = Depends(get_current_user)):
 
 
 @router.patch("/{order_id}/status", dependencies=[Depends(require_admin)])
-async def update_status(order_id: str, status: str = Body(..., embed=True)):
+async def update_status(
+    order_id: str, 
+    status: str = Body(..., embed=True),
+    tracking_id: str | None = Body(None, embed=True),
+    tracking_url: str | None = Body(None, embed=True)
+):
     if status not in STAGES + ["cancelled"]:
         raise HTTPException(status_code=400, detail="Invalid status")
     db = get_db()
+    
+    update_data = {"status": status}
+    if tracking_id:
+        update_data["tracking_id"] = tracking_id
+    if tracking_url:
+        update_data["tracking_url"] = tracking_url
+
     res = await db.orders.find_one_and_update(
-        {"_id": to_object_id(order_id)}, {"$set": {"status": status}}, return_document=True
+        {"_id": to_object_id(order_id)}, {"$set": update_data}, return_document=True
     )
     if not res:
         raise HTTPException(status_code=404, detail="Order not found")
@@ -561,7 +624,51 @@ async def update_status(order_id: str, status: str = Body(..., embed=True)):
             {"$set": {"sold_counted": True, "delivered_at": datetime.now(timezone.utc)}},
         )
 
+    msg = STATUS_MSG.get(status, f"Status: {status}")
+    if status == "shipped" and tracking_id:
+        msg += f"\nTracking ID: {tracking_id}"
+        
     await notifications.notify_users(db, [res["user_id"]], "Order update",
-                                     STATUS_MSG.get(status, f"Status: {status}"),
+                                     msg,
                                      {"type": "order", "order_id": order_id}, kind="order")
     return serialize(res)
+
+
+@router.patch("/admin/bulk-status", dependencies=[Depends(require_admin)])
+async def bulk_update_status(body: BulkStatusUpdate):
+    if body.status not in STAGES + ["cancelled"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    
+    db = get_db()
+    obj_ids = [to_object_id(id) for id in body.order_ids]
+    
+    # We fetch the orders first to see if they were already delivered
+    orders = await db.orders.find({"_id": {"$in": obj_ids}}).to_list(length=None)
+    
+    # Perform the bulk update for the status field
+    await db.orders.update_many(
+        {"_id": {"$in": obj_ids}}, 
+        {"$set": {"status": body.status}}
+    )
+    
+    # If the new status is delivered, we must handle sold_count
+    if body.status == "delivered":
+        for o in orders:
+            if not o.get("sold_counted"):
+                for it in o.get("items", []):
+                    await db.products.update_one(
+                        {"_id": to_object_id(it["product_id"])}, {"$inc": {"sold_count": it["qty"]}}
+                    )
+                await db.orders.update_one(
+                    {"_id": o["_id"]},
+                    {"$set": {"sold_counted": True, "delivered_at": datetime.now(timezone.utc)}},
+                )
+
+    # Collect unique user IDs to send a single batch notification
+    user_ids = list(set([str(o["user_id"]) for o in orders]))
+    if user_ids:
+        await notifications.notify_users(db, user_ids, "Order update",
+                                         STATUS_MSG.get(body.status, f"Status: {body.status}"),
+                                         {"type": "order"}, kind="order")
+    
+    return {"modified_count": len(orders), "status": body.status}
