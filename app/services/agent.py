@@ -113,12 +113,6 @@ async def suggestions_for(db, user, order_id) -> list[str]:
 
 
 async def _run_tool(db, user, order_id, name, args) -> dict:
-    try:
-
-    except ValueError as e:
-        return {"error": str(e)}
-    except Exception as e:  # pragma: no cover
-        return {"error": f"Something went wrong: {e}"}
     return {"error": "Unknown action"}
 
 
