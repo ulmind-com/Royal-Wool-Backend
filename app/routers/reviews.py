@@ -90,6 +90,13 @@ async def list_reviews(
     return [_public(d, viewer_id) for d in docs]
 
 
+@router.get("/highlights")
+async def review_highlights(limit: int = 30):
+    db = get_db()
+    docs = await db.reviews.find({"rating": {"$gte": 4}, "is_hidden": {"$ne": True}}).sort("created_at", -1).to_list(length=limit)
+    return [_public(d) for d in docs]
+
+
 @router.get("/summary")
 async def review_summary(product_id: str):
     db = get_db()
