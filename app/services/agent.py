@@ -12,7 +12,7 @@ import requests
 
 from app.core.config import settings
 from app.models.common import to_object_id
-from app.services import order_actions
+
 from app.services.pricing import get_settings
 
 _GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
@@ -89,30 +89,7 @@ async def _system_prompt(db, user: dict, order_id: str | None) -> str:
     return "\n".join(lines)
 
 
-_CANCEL_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "cancel_order",
-        "description": "Cancel the customer's current order and start a refund if it was paid online. Only after the customer confirms.",
-        "parameters": {"type": "object", "properties": {}, "required": []},
-    },
-}
-_RETURN_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "create_return",
-        "description": "File a return/exchange request for the eligible items of the current order. Call after collecting a reason and whether they want a refund or an exchange.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "type": {"type": "string", "enum": ["refund", "exchange"]},
-                "reason": {"type": "string", "description": "Short reason for the return"},
-                "note": {"type": "string", "description": "Optional note, e.g. desired size for an exchange"},
-            },
-            "required": ["type", "reason"],
-        },
-    },
-}
+
 
 
 async def _tools_for(db, user, order_id):
@@ -121,11 +98,6 @@ async def _tools_for(db, user, order_id):
         return []
     s = await get_settings(db)
     tools = []
-    if await order_actions.can_cancel(db, order, s):
-        tools.append(_CANCEL_TOOL)
-    items, _ = await order_actions.eligible_return_items(db, order, s)
-    if items:
-        tools.append(_RETURN_TOOL)
     return tools
 
 
@@ -135,23 +107,14 @@ async def suggestions_for(db, user, order_id) -> list[str]:
         return SUGGESTIONS
     s = await get_settings(db)
     out = ["Where's my order?"]
-    if await order_actions.can_cancel(db, order, s):
-        out.append("Cancel this order")
-    items, _ = await order_actions.eligible_return_items(db, order, s)
-    if items:
-        out.append("Return / exchange an item")
+
     out.append("Talk to a human")
     return out
 
 
 async def _run_tool(db, user, order_id, name, args) -> dict:
     try:
-        if name == "cancel_order":
-            return await order_actions.cancel(db, user["id"], order_id)
-        if name == "create_return":
-            return await order_actions.create_return(
-                db, user["id"], order_id, args.get("type", "refund"), args.get("reason", ""), args.get("note", "")
-            )
+
     except ValueError as e:
         return {"error": str(e)}
     except Exception as e:  # pragma: no cover

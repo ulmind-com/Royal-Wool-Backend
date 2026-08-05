@@ -23,7 +23,6 @@ from app.routers import (
     certifications,
     countries,
     recommendations,
-    returns,
     reviews,
     search,
     settings as settings_router,
@@ -108,7 +107,6 @@ app.include_router(recommendations.router)
 app.include_router(home_sections.router)
 app.include_router(notifications_router.router)
 app.include_router(chat.router)
-app.include_router(returns.router)
 app.include_router(site_media.router)
 app.include_router(waitlist.router)
 

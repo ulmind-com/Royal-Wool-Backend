@@ -34,7 +34,7 @@ async def _has_delivered(db, user_id: str, product_id: str) -> bool:
 
 
 async def _recompute(db, product_id: str) -> dict:
-    reviews = await db.reviews.find({"product_id": product_id}).to_list(length=5000)
+    reviews = await db.reviews.find({"product_id": product_id, "is_hidden": {"$ne": True}}).to_list(length=5000)
     count = len(reviews)
     avg = round(sum(r["rating"] for r in reviews) / count, 1) if count else 0
     await db.products.update_one(
@@ -59,7 +59,9 @@ def _public(doc: dict, viewer_id: str | None = None) -> dict:
     out.setdefault("photos", [])
     out.setdefault("tags", [])
     out.setdefault("helpful_count", 0)
+    out.setdefault("helpful_count", 0)
     out.setdefault("unhelpful_count", 0)
+    out.setdefault("is_hidden", False)
     out["my_vote"] = (
         "up" if viewer_id and viewer_id in helpful_by
         else "down" if viewer_id and viewer_id in unhelpful_by
@@ -75,7 +77,7 @@ async def list_reviews(
     viewer: dict | None = Depends(get_optional_user),
 ):
     db = get_db()
-    query: dict = {"product_id": product_id}
+    query: dict = {"product_id": product_id, "is_hidden": {"$ne": True}}
     if rating in (1, 2, 3, 4, 5):
         # Ratings are stored as whole stars; bucket defensively.
         query["rating"] = {"$gte": rating, "$lt": rating + 1}
@@ -91,7 +93,7 @@ async def list_reviews(
 @router.get("/summary")
 async def review_summary(product_id: str):
     db = get_db()
-    docs = await db.reviews.find({"product_id": product_id}).to_list(length=5000)
+    docs = await db.reviews.find({"product_id": product_id, "is_hidden": {"$ne": True}}).to_list(length=5000)
     count = len(docs)
     avg = round(sum(d["rating"] for d in docs) / count, 1) if count else 0
     breakdown = {str(s): 0 for s in range(1, 6)}
@@ -187,3 +189,43 @@ async def admin_all_reviews(product_id: str | None = None):
         item["product_title"] = titles.get(pid, "Unknown product")
         out.append(item)
     return out
+
+
+class ReplyIn(BaseModel):
+    text: str
+
+
+@router.patch("/admin/{review_id}/reply", dependencies=[Depends(require_admin)])
+async def admin_reply_review(review_id: str, body: ReplyIn):
+    db = get_db()
+    oid = to_object_id(review_id)
+    doc = await db.reviews.find_one_and_update(
+        {"_id": oid},
+        {"$set": {
+            "admin_reply": body.text.strip(),
+            "admin_reply_at": datetime.now(timezone.utc),
+        }},
+        return_document=True
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return {"ok": True, "admin_reply": doc["admin_reply"], "admin_reply_at": doc["admin_reply_at"]}
+
+
+class StatusIn(BaseModel):
+    is_hidden: bool
+
+
+@router.patch("/admin/{review_id}/status", dependencies=[Depends(require_admin)])
+async def admin_review_status(review_id: str, body: StatusIn):
+    db = get_db()
+    oid = to_object_id(review_id)
+    doc = await db.reviews.find_one_and_update(
+        {"_id": oid},
+        {"$set": {"is_hidden": body.is_hidden}},
+        return_document=True
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Review not found")
+    await _recompute(db, doc["product_id"])
+    return {"ok": True, "is_hidden": doc["is_hidden"]}
