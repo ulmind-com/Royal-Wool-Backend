@@ -53,6 +53,16 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
             "sgst": float(prod.get("sgst") or 0),
             "igst": float(prod.get("igst") or 0),
         }
+        # A product with no GST of its own falls back to the store-wide rate from
+        # Settings (tax_rate is a fraction, e.g. 0.05 -> 5%): half CGST + half
+        # SGST within the state, the full rate as IGST outside it.
+        if not any(comp.values()):
+            store_rate = float(settings.tax_rate or 0) * 100
+            comp = {
+                "cgst": store_rate / 2,
+                "sgst": store_rate / 2,
+                "igst": store_rate,
+            }
         
         cart_state.append({
             "product_id": it.product_id,
@@ -155,9 +165,11 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
     dest_state = getattr(address, "state", "") or ""
     deliv = compute_delivery(settings, subtotal - discount, dest_state, total_weight_grams)
 
+    free_reason = "threshold" if deliv["free"] else None
     if coupon_doc and coupon_doc.get("free_shipping"):
         deliv["fee"] = 0.0
         deliv["free"] = True
+        free_reason = "coupon"
 
     # Same-state order -> CGST + SGST from the product; different state -> IGST.
     shop_state = (settings.shop.state or "").strip().lower()
@@ -206,6 +218,7 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
         "discount": discount,
         "delivery": deliv["fee"],
         "delivery_free": deliv["free"],
+        "delivery_free_reason": free_reason,
         "distance_km": deliv["distance_km"],
         "deliverable": deliv["deliverable"],
         "tax": total_tax,
