@@ -24,7 +24,7 @@ class Address(BaseModel):
 class OrderCreate(BaseModel):
     items: list[OrderItemIn]
     address: Address
-    payment_method: str = "online"   # "online" | "cod"
+    payment_method: str = "online"
     coupon_code: str | None = None
 
 

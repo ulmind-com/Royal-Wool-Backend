@@ -56,6 +56,10 @@ class ProductCreate(BaseModel):
     sgst: float | None = None                   # SGST % (same-state orders)
     igst: float | None = None                   # IGST % (inter-state orders)
 
+    primary_color_name: str | None = None       # e.g., "Azure Blue"
+    primary_color_hex: str | None = None        # e.g., "#007FFF"
+    primary_color_family: str | None = None     # e.g., "Blue"
+
     images: list[str] = []                      # general gallery (no colour)
     colors: list[ColorVariant] = []             # colour-wise images + stock
     
@@ -75,9 +79,6 @@ class ProductCreate(BaseModel):
     rating: float = Field(default=0, ge=0, le=5)
     review_count: int = 0
     sold_count: int = 0
-
-    returnable: bool = True
-    return_days: int = 0
 
     is_active: bool = True
     is_featured: bool = False
@@ -103,6 +104,11 @@ class ProductUpdate(BaseModel):
     cgst: float | None = None
     sgst: float | None = None
     igst: float | None = None
+    
+    primary_color_name: str | None = None
+    primary_color_hex: str | None = None
+    primary_color_family: str | None = None
+
     images: list[str] | None = None
     colors: list[ColorVariant] | None = None
     
@@ -121,7 +127,5 @@ class ProductUpdate(BaseModel):
     rating: float | None = None
     review_count: int | None = None
     sold_count: int | None = None
-    returnable: bool | None = None
-    return_days: int | None = None
     is_active: bool | None = None
     is_featured: bool | None = None

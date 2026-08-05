@@ -11,7 +11,6 @@ from app.models.order import OrderCreate, OrderVerify, BulkStatusUpdate
 from app.routers.coupons import get_coupon
 from app.services import notifications, razorpay_service
 from app.services.pricing import (
-    cod_availability,
     compute_delivery,
     coupon_discount,
     get_settings,
@@ -226,15 +225,6 @@ async def quote(body: OrderCreate, user: dict = Depends(get_current_user)):
     return bill
 
 
-@router.get("/cod-availability")
-async def cod_availability_for_me(user: dict = Depends(get_current_user)):
-    """Whether the signed-in customer can choose Cash on Delivery right now
-    (respects the global switch, the scheduled pause, and a per-user block)."""
-    db = get_db()
-    settings = await get_settings(db)
-    return cod_availability(settings, user)
-
-
 async def _decrement_stock(db, order_items):
     for it in order_items:
         prod = await db.products.find_one({"_id": to_object_id(it["product_id"])})
@@ -287,36 +277,21 @@ async def create_order(body: OrderCreate, user: dict = Depends(get_current_user)
     if bill["subtotal"] <= 0:
         raise HTTPException(status_code=400, detail="Empty order")
 
-    is_cod = body.payment_method == "cod"
-    if is_cod:
-        settings = await get_settings(db)
-        avail = cod_availability(settings, user)
-        if not avail["available"]:
-            raise HTTPException(status_code=400, detail=avail["reason"])
     doc = {
         "user_id": user["id"],
         "items": order_items,
         "address": body.address.model_dump(),
-        "payment_method": "cod" if is_cod else "online",
+        "payment_method": "online",
         "coupon_code": body.coupon_code,
         **bill,
         "amount": bill["total"],
-        "status": "confirmed" if is_cod else "placed",
+        "status": "placed",
         "razorpay_order_id": None,
         "razorpay_payment_id": None,
         "created_at": datetime.now(timezone.utc),
     }
     res = await db.orders.insert_one(doc)
     our_id = str(res.inserted_id)
-
-    if is_cod:
-        await _decrement_stock(db, order_items)
-        if body.coupon_code:
-            await db.coupons.update_one({"code": body.coupon_code.strip().upper()}, {"$inc": {"used_count": 1}})
-        await notifications.notify_users(db, [user["id"]], "Order placed 🎉",
-                                         "Your COD order is confirmed.",
-                                         {"type": "order", "order_id": our_id}, kind="order")
-        return {"order_id": our_id, "payment_method": "cod", "status": "confirmed", "bill": bill}
 
     try:
         rp = razorpay_service.create_order(
@@ -370,67 +345,7 @@ async def verify_order(body: OrderVerify, user: dict = Depends(get_current_user)
     return {"status": "confirmed", "order_id": body.order_id}
 
 
-# Orders can be self-cancelled only before they're handed to shipping.
-CANCELLABLE = ["placed", "confirmed"]
 
-
-@router.post("/{order_id}/cancel")
-async def cancel_order(order_id: str, user: dict = Depends(get_current_user)):
-    """Customer cancels their own order — allowed only within the admin's
-    cancellation window and before the order ships. Restores stock and, for a
-    paid online order, initiates a Razorpay refund."""
-    db = get_db()
-    order = await db.orders.find_one({"_id": to_object_id(order_id)})
-    if not order or order["user_id"] != user["id"]:
-        raise HTTPException(status_code=404, detail="Order not found")
-    if order["status"] not in CANCELLABLE:
-        raise HTTPException(status_code=400, detail="This order can no longer be cancelled")
-
-    settings = await get_settings(db)
-    window = settings.cancel_window_hours or 0
-    if window <= 0:
-        raise HTTPException(status_code=400, detail="Order cancellation isn't available")
-
-    created = order.get("created_at")
-    if created and created.tzinfo is None:
-        created = created.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
-    elapsed_h = (now - created).total_seconds() / 3600 if created else 0
-    if elapsed_h > window:
-        raise HTTPException(
-            status_code=400,
-            detail=f"The cancellation window ({_fmt_window(window)}) has passed",
-        )
-
-    update: dict = {"status": "cancelled", "cancelled_at": now}
-
-    # Refund a captured online payment (best-effort — cancel regardless).
-    refunded = False
-    if order.get("payment_method") == "online" and order.get("razorpay_payment_id"):
-        try:
-            r = razorpay_service.refund(order["razorpay_payment_id"], int(round(order["amount"] * 100)))
-            update["refund_id"] = r.get("id")
-            update["refund_status"] = "initiated"
-            refunded = True
-        except Exception as e:  # pragma: no cover
-            print(f"[orders] refund failed: {e}")
-            update["refund_status"] = "failed"
-
-    await db.orders.update_one({"_id": order["_id"]}, {"$set": update})
-
-    # Stock was only decremented once the order was confirmed (COD or paid).
-    if order["status"] == "confirmed":
-        await _restore_stock(db, order["items"])
-        if order.get("coupon_code"):
-            await db.coupons.update_one({"code": order["coupon_code"].strip().upper()}, {"$inc": {"used_count": -1}})
-
-    msg = "Your order has been cancelled."
-    if refunded:
-        msg += " Your refund has been initiated."
-    await notifications.notify_users(
-        db, [user["id"]], "Order cancelled", msg, {"type": "order", "order_id": order_id}, kind="order"
-    )
-    return {"status": "cancelled", "refund": refunded}
 
 
 def _fmt_window(hours: float) -> str:
