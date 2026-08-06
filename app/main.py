@@ -15,6 +15,7 @@ from app.routers import (
     chat,
     combos,
     coupons,
+    google_reviews,
     home_sections,
     notifications as notifications_router,
     orders,
@@ -34,8 +35,10 @@ from app.routers import (
     wishlist,
 )
 from app.services import notifications as notif_service
+from app.services.google_business import GoogleBusinessNotConfigured, sync_reviews
 
 SWEEP_SECONDS = 60
+GOOGLE_SYNC_SECONDS = 6 * 60 * 60  # pull new Google reviews four times a day
 
 
 async def _notification_sweeper():
@@ -48,12 +51,27 @@ async def _notification_sweeper():
             print(f"[notif] sweeper error: {e}")
 
 
+async def _google_review_sync():
+    """Keep the storefront's Google reviews in step with the Business Profile."""
+    while True:
+        try:
+            result = await sync_reviews(get_db())
+            print(f"[google-reviews] synced: {result}")
+        except GoogleBusinessNotConfigured:
+            pass  # credentials not set up yet — stay quiet
+        except Exception as e:  # pragma: no cover
+            print(f"[google-reviews] sync error: {e}")
+        await asyncio.sleep(GOOGLE_SYNC_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_to_mongo()
     sweeper = asyncio.create_task(_notification_sweeper())
+    google_sync = asyncio.create_task(_google_review_sync())
     yield
     sweeper.cancel()
+    google_sync.cancel()
     await close_mongo_connection()
 
 
@@ -111,6 +129,7 @@ app.include_router(chat.router)
 app.include_router(returns.router)
 app.include_router(site_media.router)
 app.include_router(waitlist.router)
+app.include_router(google_reviews.router)
 
 
 import os
