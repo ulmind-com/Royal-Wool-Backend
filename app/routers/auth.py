@@ -248,15 +248,36 @@ async def firebase_auth(id_token: str = Body(..., embed=True)):
     """
     from app.services.fcm_service import _ensure_app
 
-    if not _ensure_app():
-        raise HTTPException(status_code=500, detail="Firebase is not configured")
+    if _ensure_app():
+        # Service-account path (also what FCM uses).
+        from firebase_admin import auth as fb_auth
 
-    from firebase_admin import auth as fb_auth
+        try:
+            decoded = fb_auth.verify_id_token(id_token)
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid Firebase token")
+    else:
+        # No FIREBASE_CREDENTIALS on this deploy: verify the ID token against
+        # Google's public signing certs instead. Only the (public) project id
+        # is needed, so web sign-in keeps working without a service account.
+        if not app_settings.FIREBASE_PROJECT_ID:
+            raise HTTPException(status_code=500, detail="Firebase is not configured")
 
-    try:
-        decoded = fb_auth.verify_id_token(id_token)
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid Firebase token")
+        from google.auth.transport import requests as g_requests
+        from google.oauth2 import id_token as g_id_token
+
+        try:
+            decoded = g_id_token.verify_firebase_token(
+                id_token, g_requests.Request(), app_settings.FIREBASE_PROJECT_ID
+            )
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid Firebase token")
+        if decoded.get("iss") != f"https://securetoken.google.com/{app_settings.FIREBASE_PROJECT_ID}":
+            raise HTTPException(status_code=401, detail="Invalid Firebase token")
+
+    # verify_firebase_token puts the Firebase uid in "sub"/"user_id"; the Google
+    # account id lives in firebase.identities — keep the same shape either way.
+    decoded.setdefault("sub", decoded.get("user_id"))
 
     email = (decoded.get("email") or "").lower()
     if not email:
