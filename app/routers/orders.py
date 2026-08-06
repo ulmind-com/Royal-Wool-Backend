@@ -9,7 +9,7 @@ from app.deps import get_current_user, require_admin
 from app.models.common import serialize, to_object_id
 from app.models.order import OrderCreate, OrderVerify, BulkStatusUpdate
 from app.routers.coupons import get_coupon
-from app.services import notifications, razorpay_service
+from app.services import razorpay_service
 from app.services.pricing import (
     compute_delivery,
     coupon_discount,
@@ -352,9 +352,6 @@ async def verify_order(body: OrderVerify, user: dict = Depends(get_current_user)
     await _decrement_stock(db, order["items"])
     if order.get("coupon_code"):
         await db.coupons.update_one({"code": order["coupon_code"].strip().upper()}, {"$inc": {"used_count": 1}})
-    await notifications.notify_users(db, [user["id"]], "Payment successful 🎉",
-                                     "Your order is confirmed.",
-                                     {"type": "order", "order_id": body.order_id}, kind="order")
     return {"status": "confirmed", "order_id": body.order_id}
 
 
@@ -552,13 +549,6 @@ async def update_status(
             {"$set": {"sold_counted": True, "delivered_at": datetime.now(timezone.utc)}},
         )
 
-    msg = STATUS_MSG.get(status, f"Status: {status}")
-    if status == "shipped" and tracking_id:
-        msg += f"\nTracking ID: {tracking_id}"
-        
-    await notifications.notify_users(db, [res["user_id"]], "Order update",
-                                     msg,
-                                     {"type": "order", "order_id": order_id}, kind="order")
     return serialize(res)
 
 
@@ -592,11 +582,4 @@ async def bulk_update_status(body: BulkStatusUpdate):
                     {"$set": {"sold_counted": True, "delivered_at": datetime.now(timezone.utc)}},
                 )
 
-    # Collect unique user IDs to send a single batch notification
-    user_ids = list(set([str(o["user_id"]) for o in orders]))
-    if user_ids:
-        await notifications.notify_users(db, user_ids, "Order update",
-                                         STATUS_MSG.get(body.status, f"Status: {body.status}"),
-                                         {"type": "order"}, kind="order")
-    
     return {"modified_count": len(orders), "status": body.status}

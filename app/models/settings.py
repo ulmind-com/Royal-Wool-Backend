@@ -30,6 +30,34 @@ class ShopConfig(BaseModel):
     lng: float | None = None
 
 
+class SocialLink(BaseModel):
+    label: str = ""                    # e.g. "Instagram"
+    href: str = ""                     # full profile URL
+
+
+class SupportConfig(BaseModel):
+    """
+    The support card on the storefront Contact page.
+
+    The number/email/address themselves live in ShopConfig so they stay a single
+    source of truth; everything else the card renders is editable here. A blank
+    string means "hide that row", so the admin can drop a channel without code.
+    """
+    title: str = "We're always here to help you."
+    note: str = "Reach us on whichever channel suits you."
+    hotline_label: str = "Hotline"
+    email_label: str = "Email"
+    address_label: str = "Studio"
+    whatsapp: str = "+91 89107 92214"  # display number; blank hides the row
+    whatsapp_label: str = "SMS / WhatsApp"
+    whatsapp_message: str = "Hi Royaall Wool, I have a question about your yarns."
+    hours: str = "Open 10am – 7pm IST, every day"
+    socials: list[SocialLink] = Field(default_factory=lambda: [
+        SocialLink(label="Instagram", href="https://www.instagram.com/royaallwool"),
+        SocialLink(label="Facebook", href="https://www.facebook.com/share/1SEBGxnKW6/"),
+    ])
+
+
 class Settings(BaseModel):
     currency: str = "₹"
     currency_code: str = "INR"
@@ -37,6 +65,7 @@ class Settings(BaseModel):
 
     shop: ShopConfig = ShopConfig()
     delivery: DeliveryConfig = DeliveryConfig()
+    support: SupportConfig = SupportConfig()
     
     announcements: list[str] = Field(default=[
         "Free delivery on orders above {free_delivery}",
@@ -53,4 +82,5 @@ class SettingsUpdate(BaseModel):
 
     shop: ShopConfig | None = None
     delivery: DeliveryConfig | None = None
+    support: SupportConfig | None = None
     announcements: list[str] | None = None

@@ -25,7 +25,7 @@ from app.models.user import (
     UserLogin,
     UserPublic,
 )
-from app.services import email_service, notifications
+from app.services import email_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -154,12 +154,6 @@ async def register(body: SignupComplete):
     doc["_id"] = res.inserted_id
     user = serialize(doc)
 
-    # First-order welcome nudge: a little after signup, if a first-order coupon
-    # is live then, remind them to use it (checked at send time).
-    await notifications.schedule(
-        db, user["id"], "first_order_welcome", notifications.WELCOME_DELAY_MIN
-    )
-
     token = create_access_token(user["id"], user["role"])
     return AuthResponse(access_token=token, user=_public(user))
 
@@ -216,9 +210,6 @@ async def google_auth(id_token: str = Body(..., embed=True)):
         }
         res = await db.users.insert_one(doc)
         doc["_id"] = res.inserted_id
-        await notifications.schedule(
-            db, str(doc["_id"]), "first_order_welcome", notifications.WELCOME_DELAY_MIN
-        )
     else:
         # Link Google to an existing email-based account; backfill avatar.
         patch = {}
@@ -302,9 +293,6 @@ async def firebase_auth(id_token: str = Body(..., embed=True)):
         }
         res = await db.users.insert_one(doc)
         doc["_id"] = res.inserted_id
-        await notifications.schedule(
-            db, str(doc["_id"]), "first_order_welcome", notifications.WELCOME_DELAY_MIN
-        )
     else:
         patch = {}
         if not doc.get("provider"):
@@ -380,9 +368,6 @@ async def facebook_auth(access_token: str = Body(..., embed=True)):
         }
         res = await db.users.insert_one(doc)
         doc["_id"] = res.inserted_id
-        await notifications.schedule(
-            db, str(doc["_id"]), "first_order_welcome", notifications.WELCOME_DELAY_MIN
-        )
     else:
         # Link Facebook to an existing account; backfill avatar.
         patch = {}
