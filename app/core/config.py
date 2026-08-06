@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     CLOUDINARY_API_SECRET: str = ""
 
     FIREBASE_CREDENTIALS: str = ""
+    # Public Firebase project id — lets /auth/firebase verify web sign-in ID
+    # tokens via Google's public certs when FIREBASE_CREDENTIALS is unset.
+    FIREBASE_PROJECT_ID: str = "royal-wool"
 
     # Google OAuth: the Web client ID (aud) the mobile ID token is verified
     # against. Same value the app passes as webClientId to Google Sign-In.

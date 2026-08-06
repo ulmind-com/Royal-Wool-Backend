@@ -10,4 +10,5 @@ razorpay==1.4.2
 requests>=2.32  # Groq (OpenAI-compatible) calls for AI recommendations
 setuptools==75.6.0  # razorpay 1.4.2 needs pkg_resources (removed in setuptools 81+)
 cloudinary==1.41.0
+google-auth>=2.35  # verify Firebase web ID tokens without a service account
 firebase-admin==7.5.0  # push notifications (FCM); grpcio now ships a cp314 wheel
