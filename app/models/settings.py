@@ -37,6 +37,13 @@ class Settings(BaseModel):
 
     shop: ShopConfig = ShopConfig()
     delivery: DeliveryConfig = DeliveryConfig()
+    
+    announcements: list[str] = Field(default=[
+        "Free delivery on orders above {free_delivery}",
+        "{coupon}",
+        "Support 10am–7pm IST, all days",
+        "Small-batch colour, wound for stitch definition"
+    ])
 
 
 class SettingsUpdate(BaseModel):
@@ -46,3 +53,4 @@ class SettingsUpdate(BaseModel):
 
     shop: ShopConfig | None = None
     delivery: DeliveryConfig | None = None
+    announcements: list[str] | None = None

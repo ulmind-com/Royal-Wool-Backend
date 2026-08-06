@@ -10,6 +10,7 @@ from app.routers import (
     analytics,
     auth,
     banners,
+    blog,
     brands,
     categories,
     chat,
@@ -17,7 +18,6 @@ from app.routers import (
     coupons,
     google_reviews,
     home_sections,
-    notifications as notifications_router,
     orders,
     products,
     product_lines,
@@ -33,21 +33,10 @@ from app.routers import (
     waitlist,
     wishlist,
 )
-from app.services import notifications as notif_service
 from app.services.google_business import GoogleBusinessNotConfigured, sync_reviews
 
 SWEEP_SECONDS = 60
 GOOGLE_SYNC_SECONDS = 6 * 60 * 60  # pull new Google reviews four times a day
-
-
-async def _notification_sweeper():
-    """Send scheduled notifications whose time has come, once a minute."""
-    while True:
-        await asyncio.sleep(SWEEP_SECONDS)
-        try:
-            await notif_service.run_due(get_db())
-        except Exception as e:  # pragma: no cover
-            print(f"[notif] sweeper error: {e}")
 
 
 async def _google_review_sync():
@@ -66,10 +55,8 @@ async def _google_review_sync():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_to_mongo()
-    sweeper = asyncio.create_task(_notification_sweeper())
     google_sync = asyncio.create_task(_google_review_sync())
     yield
-    sweeper.cancel()
     google_sync.cancel()
     await close_mongo_connection()
 
@@ -117,13 +104,13 @@ app.include_router(recommendations.router)
 app.include_router(wishlist.router)
 app.include_router(reviews.router)
 app.include_router(banners.router)
+app.include_router(blog.router)
 app.include_router(settings_router.router)
 app.include_router(users.router)
 app.include_router(upload.router)
 app.include_router(search.router)
 app.include_router(recommendations.router)
 app.include_router(home_sections.router)
-app.include_router(notifications_router.router)
 app.include_router(chat.router)
 app.include_router(site_media.router)
 app.include_router(waitlist.router)
@@ -133,14 +120,6 @@ app.include_router(google_reviews.router)
 import os
 
 from fastapi.responses import FileResponse
-
-_BRAND_IMAGE = os.path.join(os.path.dirname(__file__), "static", "notification-image.png")
-
-
-@app.get("/static/notification-image.png", tags=["static"])
-async def notification_image():
-    """Public brand image shown alongside push notifications."""
-    return FileResponse(_BRAND_IMAGE, media_type="image/png")
 
 
 @app.get("/", tags=["health"])

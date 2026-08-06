@@ -21,8 +21,18 @@ async def get_dashboard_analytics():
     category_revenue = defaultdict(float)
     monthly_sales = defaultdict(float)
     
-    # Fetch all products to map to category and title efficiently
+    # Collect all unique product IDs first to avoid N+1 queries
+    product_ids_to_fetch = set()
+    for order in orders:
+        for item in order.get("items", []):
+            if pid := item.get("product_id"):
+                product_ids_to_fetch.add(to_object_id(pid))
+    
+    # Pre-fetch all products in one query
     products_cache = {}
+    if product_ids_to_fetch:
+        all_products = await db.products.find({"_id": {"$in": list(product_ids_to_fetch)}}).to_list(length=None)
+        products_cache = {str(p["_id"]): p for p in all_products}
     
     for order in orders:
         amount = order.get("amount", 0)
@@ -44,12 +54,6 @@ async def get_dashboard_analytics():
             line_total = qty * price
             
             product_sales[pid] += qty
-            
-            # category logic cache check
-            if pid not in products_cache:
-                p = await db.products.find_one({"_id": to_object_id(pid)})
-                if p:
-                    products_cache[pid] = p
             
             p = products_cache.get(pid)
             if p:
