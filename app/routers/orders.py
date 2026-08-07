@@ -369,10 +369,12 @@ def _fmt_window(hours: float) -> str:
 @router.get("")
 async def my_orders(user: dict = Depends(get_current_user)):
     db = get_db()
-    # Hide abandoned online orders that were never paid.
+    # Hide abandoned online orders that were never paid — any online order
+    # without a razorpay_payment_id is a ghost order (old or new).
+    _no_ghosts = {"$nor": [{"payment_method": "online", "razorpay_payment_id": None}]}
     docs = await db.orders.find({
         "user_id": user["id"],
-        "status": {"$ne": "pending_payment"},
+        **_no_ghosts,
     }).sort("created_at", -1).to_list(length=100)
     return [serialize(d) for d in docs]
 
@@ -381,7 +383,7 @@ async def my_orders(user: dict = Depends(get_current_user)):
 async def admin_status_counts():
     db = get_db()
     pipeline = [
-        {"$match": {"status": {"$ne": "pending_payment"}}},
+        {"$match": {"$nor": [{"payment_method": "online", "razorpay_payment_id": None}]}},
         {"$group": {"_id": "$status", "count": {"$sum": 1}}},
     ]
     results = await db.orders.aggregate(pipeline).to_list(length=None)
@@ -400,7 +402,8 @@ async def all_orders(
     limit: int = 100
 ):
     db = get_db()
-    query: dict = {"status": {"$ne": "pending_payment"}}
+    # Exclude ghost orders: online orders where payment was never completed.
+    query: dict = {"$nor": [{"payment_method": "online", "razorpay_payment_id": None}]}
     
     if user_id:
         query["user_id"] = user_id
