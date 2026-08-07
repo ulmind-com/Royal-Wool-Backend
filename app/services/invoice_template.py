@@ -171,19 +171,14 @@ def render_pdf(order: dict) -> str:
   <!-- HEADER -->
   <table width="100%" cellpadding="0" cellspacing="0">
     <tr>
-      <td style="vertical-align:top;">
-        <table cellpadding="0" cellspacing="0"><tr>
-          <td style="vertical-align:middle;padding-right:10px;">
-            <img src="{logo_data}" width="44" height="44" />
-          </td>
-          <td style="vertical-align:middle;">
-            <span style="font-size:20px;color:#800000;font-weight:bold;">Royaall</span>
-            <span style="font-size:20px;color:#D4AF37;font-style:italic;"> Wool</span><br/>
-            <span style="font-size:8px;color:#999;letter-spacing:2px;">PREMIUM YARN &amp; WOOL</span>
-          </td>
-        </tr></table>
+      <td width="50%" style="vertical-align:middle;">
+        <img src="{logo_data}" width="40" height="40" style="vertical-align:middle;" />
+        <span style="font-size:20px;color:#800000;font-weight:bold;vertical-align:middle;padding-left:6px;">Royaall</span>
+        <span style="font-size:20px;color:#D4AF37;font-style:italic;vertical-align:middle;"> Wool</span>
+        <br/>
+        <span style="font-size:8px;color:#999;letter-spacing:2px;padding-left:48px;">PREMIUM YARN &amp; WOOL</span>
       </td>
-      <td style="text-align:right;vertical-align:top;">
+      <td width="50%" style="text-align:right;vertical-align:top;">
         <span style="font-size:26px;font-weight:bold;color:#333;">INVOICE</span><br/>
         <span style="font-size:11px;color:#888;">#{d["short_id"]}</span><br/>
         <span style="font-size:10px;color:#888;">{_fmt_date(d["created"])}</span>
