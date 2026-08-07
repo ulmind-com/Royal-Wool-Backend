@@ -527,13 +527,34 @@ async def admin_order_payment(order_id: str):
 
 @router.get("/{order_id}/invoice")
 async def order_invoice(order_id: str, user: dict = Depends(get_current_user)):
-    """Render a premium HTML invoice that the customer can print / save as PDF."""
+    """Generate a premium PDF invoice for the customer to download."""
     db = get_db()
     doc = await db.orders.find_one({"_id": to_object_id(order_id)})
     if not doc or (doc["user_id"] != user["id"] and user.get("role") != "admin"):
         raise HTTPException(status_code=404, detail="Order not found")
+
     from app.services.invoice_template import render as render_invoice
-    return HTMLResponse(content=render_invoice(doc))
+    from io import BytesIO
+    from xhtml2pdf import pisa
+    from fastapi.responses import StreamingResponse
+
+    html_str = render_invoice(doc)
+    pdf_buffer = BytesIO()
+    pisa_status = pisa.CreatePDF(html_str, dest=pdf_buffer)
+
+    if pisa_status.err:
+        # Fallback: return HTML if PDF generation fails
+        return HTMLResponse(content=html_str)
+
+    pdf_buffer.seek(0)
+    short_id = str(doc["_id"])[-8:].upper()
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="Invoice_Royal_Wool_{short_id}.pdf"'
+        },
+    )
 
 
 @router.get("/{order_id}")
