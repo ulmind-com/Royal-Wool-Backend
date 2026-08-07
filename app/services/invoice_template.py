@@ -6,6 +6,31 @@ Two render functions:
 """
 
 from datetime import datetime, timezone
+import base64
+import urllib.request
+
+# Cache fetched images so we don't re-download on every render
+_img_cache: dict[str, str] = {}
+
+def _get_image_b64(url: str) -> str:
+    """Fetch an image URL and return a data:image/... URI for embedding."""
+    if not url:
+        return ""
+    if url in _img_cache:
+        return _img_cache[url]
+    try:
+        data = urllib.request.urlopen(url, timeout=8).read()
+        ext = "jpeg"
+        if url.lower().endswith(".png"):
+            ext = "png"
+        elif url.lower().endswith(".webp"):
+            ext = "webp"
+        data_uri = f"data:image/{ext};base64,{base64.b64encode(data).decode('ascii')}"
+        _img_cache[url] = data_uri
+        return data_uri
+    except Exception:
+        return url  # fallback to the original URL
+
 
 
 def _fmt_money_pdf(amount: float | int | None) -> str:
@@ -81,12 +106,13 @@ def _extract(order: dict):
 def render_pdf(order: dict) -> str:
     d = _extract(order)
     fmt = _fmt_money_pdf
-    logo_url = "https://royaallwool.com/logo.jpeg"
+    logo_data = _get_image_b64("https://royaallwool.com/logo.jpeg")
 
     item_rows = ""
     for it in d["items"]:
         img_url = it.get("image") or ""
-        img_cell = f'<img src="{img_url}" width="36" height="36" />' if img_url else ""
+        img_data = _get_image_b64(img_url) if img_url else ""
+        img_cell = f'<img src="{img_data}" width="36" height="36" />' if img_data else ""
         title = it.get("title", "Product")
         color = it.get("color", "")
         size = it.get("size", "")
@@ -148,7 +174,7 @@ def render_pdf(order: dict) -> str:
       <td style="vertical-align:top;">
         <table cellpadding="0" cellspacing="0"><tr>
           <td style="vertical-align:middle;padding-right:10px;">
-            <img src="{logo_url}" width="44" height="44" />
+            <img src="{logo_data}" width="44" height="44" />
           </td>
           <td style="vertical-align:middle;">
             <span style="font-size:20px;color:#800000;font-weight:bold;">Royaall</span>
