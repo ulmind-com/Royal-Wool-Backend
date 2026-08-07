@@ -354,16 +354,29 @@ async def verify_order(body: OrderVerify, user: dict = Depends(get_current_user)
     if order.get("coupon_code"):
         await db.coupons.update_one({"code": order["coupon_code"].strip().upper()}, {"$inc": {"used_count": 1}})
 
-    # Send invoice email (non-blocking — don't fail the response if email fails)
+    # Send invoice email with PDF attachment (non-blocking — don't fail the response)
     try:
         from app.services.email_service import send_invoice_email
+        from app.services.invoice_template import render_pdf
+        from io import BytesIO
+        from xhtml2pdf import pisa
+
         # Re-fetch the order to get the updated fields (status, payment_id, paid_at)
         updated_order = await db.orders.find_one({"_id": order["_id"]})
         if updated_order:
             user_doc = await db.users.find_one({"_id": to_object_id(user["id"])})
             email = user_doc.get("email", "") if user_doc else ""
             if email:
-                send_invoice_email(email, updated_order)
+                # Generate PDF bytes for attachment
+                pdf_bytes = None
+                try:
+                    html_str = render_pdf(updated_order)
+                    buf = BytesIO()
+                    pisa.CreatePDF(html_str, dest=buf)
+                    pdf_bytes = buf.getvalue()
+                except Exception as pe:
+                    print(f"[invoice-pdf] generation failed: {pe}")
+                send_invoice_email(email, updated_order, pdf_bytes)
     except Exception as e:
         print(f"[invoice-email] failed to send: {e}")
 
@@ -533,12 +546,12 @@ async def order_invoice(order_id: str, user: dict = Depends(get_current_user)):
     if not doc or (doc["user_id"] != user["id"] and user.get("role") != "admin"):
         raise HTTPException(status_code=404, detail="Order not found")
 
-    from app.services.invoice_template import render as render_invoice
+    from app.services.invoice_template import render_pdf
     from io import BytesIO
     from xhtml2pdf import pisa
     from fastapi.responses import StreamingResponse
 
-    html_str = render_invoice(doc)
+    html_str = render_pdf(doc)
     pdf_buffer = BytesIO()
     pisa_status = pisa.CreatePDF(html_str, dest=pdf_buffer)
 

@@ -43,13 +43,44 @@ def send_otp_email(to: str, code: str, ttl_minutes: int) -> bool:
     return send_email(to, "Your verification code", _otp_html(code, ttl_minutes))
 
 
-def send_invoice_email(to: str, order: dict) -> bool:
-    """Send a premium HTML invoice to the customer after successful payment."""
-    from app.services.invoice_template import render as render_invoice
+def send_invoice_email(to: str, order: dict, pdf_bytes: bytes | None = None) -> bool:
+    """Send a premium HTML invoice email with the PDF attached."""
+    from app.services.invoice_template import render_email
     oid = str(order.get("_id", order.get("id", "")))
     short_id = oid[-8:].upper()
-    html = render_invoice(order)
-    return send_email(to, f"Your Royaall Wool invoice · #{short_id}", html)
+    html = render_email(order)
+    subject = f"Your Royaall Wool invoice · #{short_id}"
+
+    if pdf_bytes and settings.RESEND_API_KEY:
+        import base64
+        try:
+            r = requests.post(
+                _RESEND_URL,
+                headers={
+                    "Authorization": f"Bearer {settings.RESEND_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "from": _from(),
+                    "to": [to],
+                    "subject": subject,
+                    "html": html,
+                    "attachments": [{
+                        "filename": f"Invoice_Royal_Wool_{short_id}.pdf",
+                        "content": base64.b64encode(pdf_bytes).decode("ascii"),
+                    }],
+                },
+                timeout=30,
+            )
+            if r.status_code >= 400:
+                print(f"[email] Resend error {r.status_code}: {r.text}")
+                return False
+            return True
+        except Exception as e:
+            print(f"[email] send failed: {e}")
+            return False
+    else:
+        return send_email(to, subject, html)
 
 
 def _otp_html(code: str, ttl_minutes: int) -> str:
