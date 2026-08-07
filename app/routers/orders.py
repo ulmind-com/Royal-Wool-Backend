@@ -298,7 +298,7 @@ async def create_order(body: OrderCreate, user: dict = Depends(get_current_user)
         "coupon_code": body.coupon_code,
         **bill,
         "amount": bill["total"],
-        "status": "placed",
+        "status": "pending_payment",
         "razorpay_order_id": None,
         "razorpay_payment_id": None,
         "created_at": datetime.now(timezone.utc),
@@ -346,7 +346,7 @@ async def verify_order(body: OrderVerify, user: dict = Depends(get_current_user)
 
     await db.orders.update_one(
         {"_id": order["_id"]},
-        {"$set": {"status": "confirmed", "razorpay_payment_id": body.razorpay_payment_id,
+        {"$set": {"status": "placed", "razorpay_payment_id": body.razorpay_payment_id,
                   "paid_at": datetime.now(timezone.utc)}},
     )
     await _decrement_stock(db, order["items"])
@@ -369,11 +369,10 @@ def _fmt_window(hours: float) -> str:
 @router.get("")
 async def my_orders(user: dict = Depends(get_current_user)):
     db = get_db()
-    # Hide abandoned online orders that were never paid (status stays "placed"
-    # with no payment id) — they aren't real orders to the customer.
+    # Hide abandoned online orders that were never paid.
     docs = await db.orders.find({
         "user_id": user["id"],
-        "$or": [{"status": {"$ne": "placed"}}, {"razorpay_payment_id": {"$ne": None}}],
+        "status": {"$ne": "pending_payment"},
     }).sort("created_at", -1).to_list(length=100)
     return [serialize(d) for d in docs]
 
@@ -381,7 +380,10 @@ async def my_orders(user: dict = Depends(get_current_user)):
 @router.get("/admin/status-counts", dependencies=[Depends(require_admin)])
 async def admin_status_counts():
     db = get_db()
-    pipeline = [{"$group": {"_id": "$status", "count": {"$sum": 1}}}]
+    pipeline = [
+        {"$match": {"status": {"$ne": "pending_payment"}}},
+        {"$group": {"_id": "$status", "count": {"$sum": 1}}},
+    ]
     results = await db.orders.aggregate(pipeline).to_list(length=None)
     counts = {r["_id"]: r["count"] for r in results}
     all_stages = STAGES + ["cancelled"]
@@ -398,7 +400,7 @@ async def all_orders(
     limit: int = 100
 ):
     db = get_db()
-    query = {}
+    query: dict = {"status": {"$ne": "pending_payment"}}
     
     if user_id:
         query["user_id"] = user_id
