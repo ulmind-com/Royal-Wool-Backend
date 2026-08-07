@@ -2,6 +2,7 @@ import re
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi.responses import HTMLResponse
 
 from app.core.config import settings as app_settings
 from app.db.mongodb import get_db
@@ -352,6 +353,20 @@ async def verify_order(body: OrderVerify, user: dict = Depends(get_current_user)
     await _decrement_stock(db, order["items"])
     if order.get("coupon_code"):
         await db.coupons.update_one({"code": order["coupon_code"].strip().upper()}, {"$inc": {"used_count": 1}})
+
+    # Send invoice email (non-blocking — don't fail the response if email fails)
+    try:
+        from app.services.email_service import send_invoice_email
+        # Re-fetch the order to get the updated fields (status, payment_id, paid_at)
+        updated_order = await db.orders.find_one({"_id": order["_id"]})
+        if updated_order:
+            user_doc = await db.users.find_one({"_id": to_object_id(user["id"])})
+            email = user_doc.get("email", "") if user_doc else ""
+            if email:
+                send_invoice_email(email, updated_order)
+    except Exception as e:
+        print(f"[invoice-email] failed to send: {e}")
+
     return {"status": "confirmed", "order_id": body.order_id}
 
 
@@ -508,6 +523,17 @@ async def admin_order_payment(order_id: str):
         "created_at": p.get("created_at"),  # unix seconds
         "acquirer_data": p.get("acquirer_data"),
     }
+
+
+@router.get("/{order_id}/invoice")
+async def order_invoice(order_id: str, user: dict = Depends(get_current_user)):
+    """Render a premium HTML invoice that the customer can print / save as PDF."""
+    db = get_db()
+    doc = await db.orders.find_one({"_id": to_object_id(order_id)})
+    if not doc or (doc["user_id"] != user["id"] and user.get("role") != "admin"):
+        raise HTTPException(status_code=404, detail="Order not found")
+    from app.services.invoice_template import render as render_invoice
+    return HTMLResponse(content=render_invoice(doc))
 
 
 @router.get("/{order_id}")

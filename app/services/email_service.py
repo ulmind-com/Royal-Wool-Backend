@@ -43,6 +43,15 @@ def send_otp_email(to: str, code: str, ttl_minutes: int) -> bool:
     return send_email(to, "Your verification code", _otp_html(code, ttl_minutes))
 
 
+def send_invoice_email(to: str, order: dict) -> bool:
+    """Send a premium HTML invoice to the customer after successful payment."""
+    from app.services.invoice_template import render as render_invoice
+    oid = str(order.get("_id", order.get("id", "")))
+    short_id = oid[-8:].upper()
+    html = render_invoice(order)
+    return send_email(to, f"Your Royaall Wool invoice · #{short_id}", html)
+
+
 def _otp_html(code: str, ttl_minutes: int) -> str:
     boxes = "".join(
         f'<span style="display:inline-block;min-width:44px;padding:12px 0;margin:0 4px;'
