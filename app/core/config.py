@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # Transactional email (Resend) — used for the signup OTP. Client swaps
     # these later; leaving RESEND_API_KEY empty just logs the code (dev).
     RESEND_API_KEY: str = ""
-    MAIL_ADDRESS: str = "noreply@samiransamanta.in"
+    MAIL_ADDRESS: str = "noreply@royaallwool.com"
     MAIL_FROM_NAME: str = "Royaall Wool"
     OTP_TTL_MINUTES: int = 10           # how long a code stays valid
     OTP_RESEND_COOLDOWN_SECONDS: int = 60  # min gap between resends
