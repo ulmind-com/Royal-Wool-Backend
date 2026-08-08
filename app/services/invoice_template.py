@@ -163,7 +163,7 @@ def render_pdf(order: dict) -> str:
   <meta charset="utf-8" />
   <title>Invoice #{d["short_id"]}</title>
   <style>
-    @page {{ size: A4; margin: 0; }}
+    @page {{ size: A4; margin: 1.2cm 1.2cm 1.5cm 1.2cm; }}
     body {{ font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #333; margin: 0; padding: 0; }}
   </style>
 </head>
@@ -195,16 +195,10 @@ def render_pdf(order: dict) -> str:
         <span style="font-size:9px;color:#D4AF37;letter-spacing:1px;font-weight:bold;">TAX INVOICE</span>
       </td>
       <td width="50%" style="text-align:right;vertical-align:top;">
-        <table cellpadding="0" cellspacing="0" style="float:right;">
-          <tr>
-            <td style="font-size:9px;color:#8c8680;text-align:right;padding:2px 0;">Invoice No.</td>
-            <td style="font-size:11px;color:#2c2320;font-weight:bold;text-align:right;padding:2px 0 2px 12px;">#{d["short_id"]}</td>
-          </tr>
-          <tr>
-            <td style="font-size:9px;color:#8c8680;text-align:right;padding:2px 0;">Date</td>
-            <td style="font-size:10px;color:#2c2320;text-align:right;padding:2px 0 2px 12px;">{_fmt_date(d["created"])}</td>
-          </tr>
-        </table>
+        <span style="font-size:9px;color:#8c8680;">Invoice No.</span>
+        <span style="font-size:11px;color:#2c2320;font-weight:bold;padding-left:6px;">#{d["short_id"]}</span><br/>
+        <span style="font-size:9px;color:#8c8680;">Date</span>
+        <span style="font-size:10px;color:#2c2320;padding-left:6px;">{_fmt_date(d["created"])}</span>
       </td>
     </tr>
   </table>
@@ -274,7 +268,7 @@ def render_pdf(order: dict) -> str:
   <table width="100%" cellpadding="0" cellspacing="0" style="padding:4px 40px;">
     <tr>
       <td style="text-align:center;">
-        <span style="color:#D4AF37;font-size:14px;">&#10043; &nbsp; &#10043; &nbsp; &#10043;</span>
+        <span style="color:#D4AF37;font-size:12px;">- - - - -</span>
       </td>
     </tr>
   </table>
@@ -297,7 +291,7 @@ def render_pdf(order: dict) -> str:
   </table>
 
   <!-- BOTTOM ACCENT -->
-  <table width="100%" cellpadding="0" cellspacing="0" style="position:absolute;bottom:0;left:0;">
+  <table width="100%" cellpadding="0" cellspacing="0">
     <tr><td style="background:#D4AF37;height:3px;"></td></tr>
     <tr><td style="background:#6b1520;height:8px;"></td></tr>
   </table>
