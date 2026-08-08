@@ -125,21 +125,21 @@ def render_pdf(order: dict) -> str:
 
         item_rows += f"""
         <tr style="background:{bg};">
-          <td width="44" style="padding:10px 4px;border-bottom:1px solid #ebe7e0;vertical-align:top;text-align:center;">{img_cell}</td>
-          <td style="padding:10px 6px;border-bottom:1px solid #ebe7e0;vertical-align:top;font-size:11px;color:#2c2320;">
-            {title}{f'<br/><span style="font-size:9px;color:#9a9490;">{meta}</span>' if meta else ''}
+          <td width="40" style="padding:6px 3px;border-bottom:1px solid #ebe7e0;vertical-align:top;text-align:center;">{img_cell}</td>
+          <td style="padding:6px 5px;border-bottom:1px solid #ebe7e0;vertical-align:top;font-size:10px;color:#2c2320;">
+            {title}{f'<br/><span style="font-size:8px;color:#9a9490;">{meta}</span>' if meta else ''}
           </td>
-          <td width="35" style="padding:10px 4px;border-bottom:1px solid #ebe7e0;text-align:center;font-size:11px;color:#2c2320;">{qty}</td>
-          <td width="85" style="padding:10px 4px;border-bottom:1px solid #ebe7e0;text-align:right;font-size:11px;color:#6b6560;">{fmt(price)}</td>
-          <td width="95" style="padding:10px 4px;border-bottom:1px solid #ebe7e0;text-align:right;font-size:11px;font-weight:bold;color:#2c2320;">{fmt(line)}</td>
+          <td width="30" style="padding:6px 3px;border-bottom:1px solid #ebe7e0;text-align:center;font-size:10px;color:#2c2320;">{qty}</td>
+          <td width="75" style="padding:6px 3px;border-bottom:1px solid #ebe7e0;text-align:right;font-size:10px;color:#6b6560;">{fmt(price)}</td>
+          <td width="85" style="padding:6px 3px;border-bottom:1px solid #ebe7e0;text-align:right;font-size:10px;font-weight:bold;color:#2c2320;">{fmt(line)}</td>
         </tr>"""
 
     def _sr(label, value, color="#2c2320", bold=False):
         fw = "font-weight:bold;" if bold else ""
-        fs = "font-size:13px;" if bold else "font-size:11px;"
+        fs = "font-size:12px;" if bold else "font-size:10px;"
         return f"""<tr>
-          <td style="padding:5px 8px;text-align:right;font-size:11px;color:#8c8680;">{label}</td>
-          <td width="130" style="padding:5px 8px;text-align:right;{fs}{fw}color:{color};">{value}</td>
+          <td style="padding:3px 6px;text-align:right;font-size:10px;color:#8c8680;">{label}</td>
+          <td width="120" style="padding:3px 6px;text-align:right;{fs}{fw}color:{color};">{value}</td>
         </tr>"""
 
     summary = _sr("Subtotal", fmt(d["subtotal"]))
@@ -164,7 +164,7 @@ def render_pdf(order: dict) -> str:
   <meta charset="utf-8" />
   <title>Invoice #{d["short_id"]}</title>
   <style>
-    @page {{ size: A4; margin: 1.8cm 1.5cm; }}
+    @page {{ size: A4; margin: 1cm 1.2cm; }}
     body {{ font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #333; margin: 0; padding: 0; }}
   </style>
 </head>
@@ -189,26 +189,26 @@ def render_pdf(order: dict) -> str:
   </table>
 
   <!-- MAROON + GOLD ACCENT LINES -->
-  <table width="100%" cellpadding="0" cellspacing="0" style="margin:12px 0 0;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 0;">
     <tr><td style="background:#800000;height:2px;"></td></tr>
     <tr><td style="background:#D4AF37;height:1px;"></td></tr>
   </table>
 
   <!-- BILL TO / PAYMENT -->
-  <table width="100%" cellpadding="0" cellspacing="0" style="margin:14px 0;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0;">
     <tr>
-      <td width="55%" style="vertical-align:top;background:#faf7f2;padding:12px 14px;border-left:3px solid #D4AF37;">
-        <p style="font-size:8px;font-weight:bold;color:#D4AF37;letter-spacing:2px;margin:0 0 5px;">BILL TO</p>
-        <p style="font-size:14px;font-weight:bold;color:#2c2320;margin:0 0 3px;">{d["customer_name"]}</p>
-        <p style="font-size:10px;color:#6b6560;margin:0;line-height:1.6;">{d["full_address"]}</p>
-        {f'<p style="font-size:10px;color:#6b6560;margin:2px 0 0;">{d["customer_phone"]}</p>' if d["customer_phone"] else ""}
+      <td width="55%" style="vertical-align:top;background:#faf7f2;padding:8px 10px;border-left:3px solid #D4AF37;">
+        <p style="font-size:8px;font-weight:bold;color:#D4AF37;letter-spacing:2px;margin:0 0 3px;">BILL TO</p>
+        <p style="font-size:13px;font-weight:bold;color:#2c2320;margin:0 0 2px;">{d["customer_name"]}</p>
+        <p style="font-size:9px;color:#6b6560;margin:0;line-height:1.5;">{d["full_address"]}</p>
+        {f'<p style="font-size:9px;color:#6b6560;margin:1px 0 0;">{d["customer_phone"]}</p>' if d["customer_phone"] else ""}
       </td>
       <td width="3%"></td>
-      <td width="42%" style="text-align:right;vertical-align:top;background:#faf7f2;padding:12px 14px;border-left:3px solid #800000;">
-        <p style="font-size:8px;font-weight:bold;color:#800000;letter-spacing:2px;margin:0 0 5px;">PAYMENT</p>
-        <p style="font-size:14px;font-weight:bold;color:#2c2320;margin:0 0 3px;">{fmt(d["total"])}</p>
-        <p style="font-size:10px;color:#6b6560;margin:0;">{d["payment_method"]}</p>
-        {f'<p style="font-size:9px;color:#8c8680;margin:2px 0 0;">{d["payment_id"]}</p>' if d["payment_id"] else ""}
+      <td width="42%" style="text-align:right;vertical-align:top;background:#faf7f2;padding:8px 10px;border-left:3px solid #800000;">
+        <p style="font-size:8px;font-weight:bold;color:#800000;letter-spacing:2px;margin:0 0 3px;">PAYMENT</p>
+        <p style="font-size:13px;font-weight:bold;color:#2c2320;margin:0 0 2px;">{fmt(d["total"])}</p>
+        <p style="font-size:9px;color:#6b6560;margin:0;">{d["payment_method"]}</p>
+        {f'<p style="font-size:8px;color:#8c8680;margin:1px 0 0;">{d["payment_id"]}</p>' if d["payment_id"] else ""}
       </td>
     </tr>
   </table>
@@ -216,22 +216,22 @@ def render_pdf(order: dict) -> str:
   <!-- ITEMS TABLE -->
   <table width="100%" cellpadding="0" cellspacing="0">
     <tr style="background:#800000;">
-      <td width="44" style="padding:8px 4px;font-size:8px;color:#D4AF37;">&nbsp;</td>
-      <td style="padding:8px 6px;font-size:8px;font-weight:bold;color:#D4AF37;letter-spacing:1.5px;">ITEM</td>
-      <td width="35" style="padding:8px 4px;font-size:8px;font-weight:bold;color:#D4AF37;letter-spacing:1px;text-align:center;">QTY</td>
-      <td width="85" style="padding:8px 4px;font-size:8px;font-weight:bold;color:#D4AF37;letter-spacing:1px;text-align:right;">PRICE</td>
-      <td width="95" style="padding:8px 4px;font-size:8px;font-weight:bold;color:#D4AF37;letter-spacing:1px;text-align:right;">TOTAL</td>
+      <td width="40" style="padding:5px 3px;font-size:7px;color:#D4AF37;">&nbsp;</td>
+      <td style="padding:5px 5px;font-size:7px;font-weight:bold;color:#D4AF37;letter-spacing:1.5px;">ITEM</td>
+      <td width="30" style="padding:5px 3px;font-size:7px;font-weight:bold;color:#D4AF37;letter-spacing:1px;text-align:center;">QTY</td>
+      <td width="75" style="padding:5px 3px;font-size:7px;font-weight:bold;color:#D4AF37;letter-spacing:1px;text-align:right;">PRICE</td>
+      <td width="85" style="padding:5px 3px;font-size:7px;font-weight:bold;color:#D4AF37;letter-spacing:1px;text-align:right;">TOTAL</td>
     </tr>
     {item_rows}
   </table>
 
   <!-- SUMMARY -->
-  <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:10px;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;">
     {summary}
-    <tr><td colspan="2"><hr style="border:none;border-top:1px solid #D4AF37;margin:6px 0;" /></td></tr>
+    <tr><td colspan="2"><hr style="border:none;border-top:1px solid #D4AF37;margin:4px 0;" /></td></tr>
     <tr style="background:#800000;">
-      <td style="padding:10px 8px;text-align:right;font-size:12px;font-weight:bold;color:#D4AF37;letter-spacing:1px;">Grand Total</td>
-      <td width="130" style="padding:10px 8px;text-align:right;font-size:18px;font-weight:bold;color:#ffffff;">{fmt(d["total"])}</td>
+      <td style="padding:7px 6px;text-align:right;font-size:11px;font-weight:bold;color:#D4AF37;letter-spacing:1px;">Grand Total</td>
+      <td width="120" style="padding:7px 6px;text-align:right;font-size:16px;font-weight:bold;color:#ffffff;">{fmt(d["total"])}</td>
     </tr>
   </table>
 
@@ -240,14 +240,14 @@ def render_pdf(order: dict) -> str:
     <tr><td style="background:#D4AF37;height:2px;"></td></tr>
   </table>
 
-  <hr style="border:none;border-top:1px solid #e5e5e5;margin:24px 0 14px;" />
+  <hr style="border:none;border-top:1px solid #e5e5e5;margin:14px 0 8px;" />
 
   <!-- FOOTER -->
   <table width="100%" cellpadding="0" cellspacing="0">
-    <tr><td style="text-align:center;padding:6px 0;">
-      <p style="font-size:13px;color:#800000;font-style:italic;font-weight:bold;margin:0 0 8px;">Thank you for shopping with Royaall Wool!</p>
-      <p style="font-size:9px;color:#bbb;margin:0 0 2px;">This is a computer generated invoice and does not require a signature.</p>
-      <p style="font-size:9px;color:#bbb;margin:0;">Royaall Wool &middot; Premium Yarn &amp; Wool Retailer &middot; www.royaallwool.com</p>
+    <tr><td style="text-align:center;padding:2px 0;">
+      <p style="font-size:11px;color:#800000;font-style:italic;font-weight:bold;margin:0 0 4px;">Thank you for shopping with Royaall Wool!</p>
+      <p style="font-size:8px;color:#bbb;margin:0 0 1px;">This is a computer generated invoice and does not require a signature.</p>
+      <p style="font-size:8px;color:#bbb;margin:0;">Royaall Wool &middot; Premium Yarn &amp; Wool Retailer &middot; www.royaallwool.com</p>
     </td></tr>
   </table>
 
