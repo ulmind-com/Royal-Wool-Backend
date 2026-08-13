@@ -38,7 +38,10 @@ async def _category_ids_with_children(db, category_id: str) -> list[str]:
 async def list_products(
     category_id: str | None = None,
     q: str | None = Query(default=None),
-    limit: int = Query(default=20, le=100),
+    brand: str | None = None,
+    product_line: str | None = None,
+    skein_weight: int | None = None,
+    limit: int = Query(default=20, le=200),
     skip: int = 0,
     admin: bool = False,
 ):
@@ -50,6 +53,12 @@ async def list_products(
         query["category_id"] = {"$in": await _category_ids_with_children(db, category_id)}
     if q:
         query["$text"] = {"$search": q}
+    if brand:
+        query["brand"] = brand
+    if product_line:
+        query["product_line"] = product_line
+    if skein_weight is not None:
+        query["skein_weight"] = skein_weight
     cursor = db.products.find(query).skip(skip).limit(limit).sort("created_at", -1)
     docs = await cursor.to_list(length=limit)
     return [_decorate(d) for d in docs]

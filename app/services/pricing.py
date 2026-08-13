@@ -97,9 +97,9 @@ def product_final_price(product: dict) -> dict:
     return {"final_price": final, "struck_price": struck, "off_pct": off}
 
 
-def _variant_params(product: dict, color=None, dye_lot=None) -> tuple:
-    """Resolve (price, mrp, discount_pct, discount_on) for a colour+dye_lot.
-    Fallback order for every field: dye_lot -> colour -> product base."""
+def _variant_params(product: dict, color=None) -> tuple:
+    """Resolve (price, mrp, discount_pct, discount_on) for a colour.
+    Fallback order for every field: colour -> product base."""
     price = product.get("price") or 0
     mrp = product.get("mrp") or 0
     disc = product.get("discount_pct") or 0
@@ -114,41 +114,27 @@ def _variant_params(product: dict, color=None, dye_lot=None) -> tuple:
                 disc = c["discount_pct"]
             if c.get("discount_on"):
                 on = c["discount_on"]
-            for dl in (c.get("dye_lots") or []):
-                if dl.get("dye_lot") == dye_lot:
-                    if dl.get("price") is not None:
-                        price = dl["price"]
-                    if dl.get("mrp") is not None:
-                        mrp = dl["mrp"]
-                    if dl.get("discount_pct") is not None:
-                        disc = dl["discount_pct"]
-                    if dl.get("discount_on"):
-                        on = dl["discount_on"]
-                    break
             break
     return price, mrp, disc, on
 
 
-def resolve_price(product: dict, color=None, dye_lot=None) -> dict:
-    """Display pricing for a specific colour + dye_lot selection."""
-    price, mrp, disc, on = _variant_params(product, color, dye_lot)
+def resolve_price(product: dict, color=None) -> dict:
+    """Display pricing for a specific colour selection."""
+    price, mrp, disc, on = _variant_params(product, color)
     final, struck, off = _apply(mrp, price, disc, on)
     return {"final_price": final, "struck_price": struck, "off_pct": off}
 
 
 def _combos(product: dict) -> list[tuple]:
-    """(final, struck, off) for every colour+dye_lot combination."""
+    """(final, struck, off) for every colour."""
     out = []
     colors = [c for c in (product.get("colors") or []) if isinstance(c, dict)]
     if colors:
         for c in colors:
-            dye_lots = c.get("dye_lots") or []
-            targets = [dl.get("dye_lot") for dl in dye_lots] if dye_lots else [None]
-            for dl in targets:
-                p, m, d, o = _variant_params(product, c.get("name"), dl)
-                out.append(_apply(m, p, d, o))
+            p, m, d, o = _variant_params(product, c.get("name"))
+            out.append(_apply(m, p, d, o))
     else:
-        p, m, d, o = _variant_params(product, None, None)
+        p, m, d, o = _variant_params(product, None)
         out.append(_apply(m, p, d, o))
     return out or [_apply(product.get("mrp") or 0, product.get("price") or 0,
                           product.get("discount_pct") or 0, product.get("discount_on") or "price")]
@@ -170,15 +156,9 @@ def price_span(product: dict) -> dict:
     }
 
 
-def variant_stock(product: dict, color=None, dye_lot=None) -> int:
+def variant_stock(product: dict, color=None) -> int:
     for c in (product.get("colors") or []):
         if isinstance(c, dict) and c.get("name") == color:
-            dye_lots = c.get("dye_lots") or []
-            if dye_lots:
-                for dl in dye_lots:
-                    if dl.get("dye_lot") == dye_lot:
-                        return int(dl.get("stock", 0))
-                return 0
             return int(c.get("stock", 0))
     return int(product.get("stock", 0))
 
@@ -186,11 +166,7 @@ def variant_stock(product: dict, color=None, dye_lot=None) -> int:
 def total_stock(product: dict) -> int:
     colors = [c for c in (product.get("colors") or []) if isinstance(c, dict)]
     if colors:
-        s = 0
-        for c in colors:
-            dye_lots = c.get("dye_lots") or []
-            s += sum(int(x.get("stock", 0)) for x in dye_lots) if dye_lots else int(c.get("stock", 0))
-        return s
+        return sum(int(c.get("stock", 0)) for c in colors)
     return int(product.get("stock", 0))
 
 

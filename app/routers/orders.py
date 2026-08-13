@@ -43,8 +43,8 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
         prod = await db.products.find_one({"_id": to_object_id(it.product_id)})
         if not prod or not prod.get("is_active", True):
             raise HTTPException(status_code=400, detail="Product unavailable")
-        # Price for the exact colour + size the customer chose (variant-aware).
-        unit = resolve_price(prod, it.color, it.size)["final_price"]
+        # Price for the exact colour the customer chose (variant-aware).
+        unit = resolve_price(prod, it.color)["final_price"]
         line_total = unit * it.qty
         subtotal += line_total
         total_weight_grams += float(prod.get("shipping_weight") or 0) * it.qty
