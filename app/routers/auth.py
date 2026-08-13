@@ -40,6 +40,8 @@ def _public(doc: dict) -> UserPublic:
         phone=doc.get("phone"),
         avatar=doc.get("avatar"),
         role=doc.get("role", "user"),
+        # No stored flag on the original owner account => treat as super admin.
+        is_super=bool(doc.get("is_super", doc.get("role") == "admin")),
         addresses=doc.get("addresses") or [],
         cart=doc.get("cart") or [],
         created_at=created_str,
@@ -169,6 +171,19 @@ async def login(body: UserLogin):
         raise HTTPException(status_code=401, detail="Invalid email or password")
     user = serialize(doc)
     token = create_access_token(user["id"], user.get("role", "user"))
+    if user.get("role") == "admin":
+        now = datetime.now(timezone.utc)
+        await db.users.update_one({"_id": doc["_id"]}, {"$set": {"last_login": now}})
+        await db.admin_activity.insert_one({
+            "admin_id": user["id"],
+            "admin_email": user.get("email"),
+            "admin_name": user.get("name"),
+            "method": "LOGIN",
+            "path": "/auth/login",
+            "action": "Logged in",
+            "status": 200,
+            "at": now,
+        })
     return AuthResponse(access_token=token, user=_public(user))
 
 

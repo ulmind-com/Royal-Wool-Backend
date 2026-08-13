@@ -30,6 +30,12 @@ class UserLogin(BaseModel):
     password: str
 
 
+class AdminCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    email: EmailStr
+    password: str = Field(min_length=6, max_length=128)
+
+
 class UserPublic(BaseModel):
     id: str
     name: str
@@ -37,6 +43,7 @@ class UserPublic(BaseModel):
     phone: str | None = None
     avatar: str | None = None
     role: str = "user"
+    is_super: bool = False
     addresses: list = []
     cart: list = []
     created_at: str | None = None

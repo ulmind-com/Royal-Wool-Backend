@@ -48,3 +48,11 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+async def require_super_admin(user: dict = Depends(require_admin)) -> dict:
+    # Admins created before this feature have no `is_super` field -> treated as
+    # super (the original owner credential). New admins are created with is_super=False.
+    if not user.get("is_super", True):
+        raise HTTPException(status_code=403, detail="Super admin access required")
+    return user

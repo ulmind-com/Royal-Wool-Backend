@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.db.mongodb import close_mongo_connection, connect_to_mongo, get_db
 from app.routers import (
+    admins,
     analytics,
     auth,
     banners,
@@ -73,23 +74,63 @@ app.add_middleware(
 
 import time
 import logging
+from datetime import datetime, timezone
 from fastapi import Request
 
+from app.core.security import decode_access_token
+from app.models.common import to_object_id
+
 logger = logging.getLogger("uvicorn.error")
+
+_AUDITED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+async def _record_admin_action(request: Request, status_code: int) -> None:
+    """Log any mutating request made by an admin so a super admin can audit it."""
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return
+    try:
+        payload = decode_access_token(auth_header.split(" ", 1)[1])
+    except Exception:
+        return
+    if payload.get("role") != "admin":
+        return
+    db = get_db()
+    admin = await db.users.find_one({"_id": to_object_id(payload.get("sub"))})
+    if not admin:
+        return
+    await db.admin_activity.insert_one({
+        "admin_id": str(admin["_id"]),
+        "admin_email": admin.get("email"),
+        "admin_name": admin.get("name"),
+        "method": request.method,
+        "path": request.url.path,
+        "status": status_code,
+        "at": datetime.now(timezone.utc),
+    })
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
-    
+
     # Don't clutter logs with static files or health checks if you prefer
     if not request.url.path.startswith("/static"):
         logger.info(f"🌐 [{request.method}] {request.url.path} - Status: {response.status_code} - {process_time * 1000:.1f}ms")
-    
+
+    if request.method in _AUDITED_METHODS:
+        try:
+            await _record_admin_action(request, response.status_code)
+        except Exception:
+            pass  # auditing must never break the actual request
+
     return response
 
 app.include_router(auth.router)
+app.include_router(admins.router)
 app.include_router(analytics.router)
 app.include_router(brands.router)
 app.include_router(categories.router)
