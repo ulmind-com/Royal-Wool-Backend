@@ -42,6 +42,8 @@ def _public(doc: dict) -> UserPublic:
         role=doc.get("role", "user"),
         # No stored flag on the original owner account => treat as super admin.
         is_super=bool(doc.get("is_super", doc.get("role") == "admin")),
+        # None => unrestricted (owner / admins created before this feature).
+        permissions=doc.get("permissions"),
         addresses=doc.get("addresses") or [],
         cart=doc.get("cart") or [],
         created_at=created_str,

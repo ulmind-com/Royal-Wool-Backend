@@ -34,6 +34,13 @@ class AdminCreate(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
+    permissions: list[str] = []  # section keys this admin may access
+
+
+class AdminUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    password: str | None = Field(default=None, min_length=6, max_length=128)
+    permissions: list[str] | None = None
 
 
 class UserPublic(BaseModel):
@@ -44,6 +51,7 @@ class UserPublic(BaseModel):
     avatar: str | None = None
     role: str = "user"
     is_super: bool = False
+    permissions: list[str] | None = None  # None = full access (owner / legacy admin)
     addresses: list = []
     cart: list = []
     created_at: str | None = None

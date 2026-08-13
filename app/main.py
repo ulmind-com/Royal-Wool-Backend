@@ -76,6 +76,7 @@ import time
 import logging
 from datetime import datetime, timezone
 from fastapi import Request
+from fastapi.responses import JSONResponse
 
 from app.core.security import decode_access_token
 from app.models.common import to_object_id
@@ -83,6 +84,56 @@ from app.models.common import to_object_id
 logger = logging.getLogger("uvicorn.error")
 
 _AUDITED_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+# First URL path segment -> the section key(s) that grant write access to it.
+# A non-super admin may only mutate an endpoint if their permissions include at
+# least one granting section. Segments not listed here are always allowed
+# (uploads, search, wishlist, analytics reads, /admins is already super-only…).
+_SECTION_WRITE = {
+    "products": {"products"},
+    "product-lines": {"products"},
+    "brands": {"products"},
+    "certifications": {"products"},
+    "countries": {"products"},
+    "categories": {"categories"},
+    "combos": {"combos"},
+    "waitlist": {"waitlist"},
+    "orders": {"orders"},
+    "reviews": {"reviews"},
+    "coupons": {"coupons"},
+    "users": {"users"},
+    "home-sections": {"home-layout"},
+    "banners": {"home-layout"},
+    "site-media": {"home-layout"},
+    "blog": {"blog"},
+    "settings": {"settings", "announcements"},  # Store Settings + Store Marquee
+}
+
+
+async def _permission_denied(request: Request) -> bool:
+    """True if a non-super admin is writing to a section they don't have access to."""
+    if request.method not in _AUDITED_METHODS:
+        return False
+    segment = request.url.path.strip("/").split("/")[0]
+    grantors = _SECTION_WRITE.get(segment)
+    if not grantors:
+        return False
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return False  # unauthenticated -> let the route's own auth reject it
+    try:
+        payload = decode_access_token(auth_header.split(" ", 1)[1])
+    except Exception:
+        return False
+    if payload.get("role") != "admin":
+        return False
+    admin = await get_db().users.find_one({"_id": to_object_id(payload.get("sub"))})
+    if not admin or admin.get("is_super", True):
+        return False  # owner / super admin -> unrestricted
+    perms = admin.get("permissions")
+    if perms is None:
+        return False  # legacy admin without a permission list -> unrestricted
+    return grantors.isdisjoint(perms)
 
 
 async def _record_admin_action(request: Request, status_code: int) -> None:
@@ -114,6 +165,16 @@ async def _record_admin_action(request: Request, status_code: int) -> None:
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.time()
+
+    try:
+        if await _permission_denied(request):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "You don't have access to this section."},
+            )
+    except Exception:
+        pass  # never let the permission check itself break a request
+
     response = await call_next(request)
     process_time = time.time() - start_time
 

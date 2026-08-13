@@ -6,7 +6,7 @@ from app.core.security import hash_password
 from app.db.mongodb import get_db
 from app.deps import require_super_admin
 from app.models.common import serialize, to_object_id
-from app.models.user import AdminCreate
+from app.models.user import AdminCreate, AdminUpdate
 
 router = APIRouter(prefix="/admins", tags=["admins"])
 
@@ -17,6 +17,7 @@ def _admin_public(d: dict) -> dict:
         "name": d.get("name"),
         "email": d.get("email"),
         "is_super": bool(d.get("is_super", True)),
+        "permissions": d.get("permissions"),  # None = full access
         "created_at": str(d["created_at"]) if d.get("created_at") else None,
         "last_login": str(d["last_login"]) if d.get("last_login") else None,
     }
@@ -43,11 +44,33 @@ async def create_admin(body: AdminCreate):
         "password": hash_password(body.password),
         "role": "admin",
         "is_super": False,
+        "permissions": body.permissions,
         "created_at": datetime.now(timezone.utc),
     }
     res = await db.users.insert_one(doc)
     doc["_id"] = res.inserted_id
     return _admin_public(serialize(doc))
+
+
+@router.patch("/{admin_id}")
+async def update_admin(admin_id: str, body: AdminUpdate, su: dict = Depends(require_super_admin)):
+    """Super admin: edit a team admin — rename, reset password, or change access."""
+    target = await get_db().users.find_one({"_id": to_object_id(admin_id)})
+    if not target or target.get("role") != "admin":
+        raise HTTPException(status_code=404, detail="Admin not found.")
+    if target.get("is_super", True):
+        raise HTTPException(status_code=400, detail="A super admin cannot be edited here.")
+    patch: dict = {}
+    if body.name is not None:
+        patch["name"] = body.name
+    if body.password:
+        patch["password"] = hash_password(body.password)
+    if body.permissions is not None:
+        patch["permissions"] = body.permissions
+    if patch:
+        await get_db().users.update_one({"_id": to_object_id(admin_id)}, {"$set": patch})
+    updated = await get_db().users.find_one({"_id": to_object_id(admin_id)})
+    return _admin_public(serialize(updated))
 
 
 @router.delete("/{admin_id}")
