@@ -7,20 +7,10 @@ class FiberContent(BaseModel):
     percentage: int = Field(ge=1, le=100)
 
 
-class DyeLotStock(BaseModel):
-    """Replaces SizeStock. Inventory is now tracked per dye lot."""
-    dye_lot: str                       # e.g. "Lot-104A"
-    price: float | None = None         # per-dye-lot selling price (falls back to colour/base)
-    mrp: float | None = None           # per-dye-lot MRP (falls back to colour/base)
-    discount_pct: float | None = None  # per-dye-lot extra discount % (falls back to colour/base)
-    discount_on: str | None = None     # "price" | "mrp" (falls back to colour/base)
-    stock: int = 0                     # inventory for this colour + dye lot
-
-
 class ColorVariant(BaseModel):
-    """Color variant now nests DyeLotStock instead of SizeStock."""
     color_family: str | None = None    # e.g. "Red", "Blue", "Multi"
     name: str                          # e.g. "Orange"
+    shade_code: str | None = None      # e.g. "OLV001" — admin-assigned wool shade code
     hex: str = "#000000"               # swatch colour fallback
     swatch_image: str | None = None    # image URL for the swatch (yarn texture)
     images: list[str] = []             # images shown when this colour is picked
@@ -28,8 +18,7 @@ class ColorVariant(BaseModel):
     mrp: float | None = None           # per-colour MRP (falls back to base)
     discount_pct: float | None = None  # per-colour extra discount % (falls back to base)
     discount_on: str | None = None     # "price" | "mrp" (falls back to base)
-    stock: int = 0                     # inventory for this colour (when it has no per-dye-lot rows)
-    dye_lots: list[DyeLotStock] = Field(default_factory=list)  # per-dye-lot price + stock
+    stock: int = 0                     # inventory for this colour
 
 
 class ProductCreate(BaseModel):
@@ -59,6 +48,7 @@ class ProductCreate(BaseModel):
     primary_color_name: str | None = None       # e.g., "Azure Blue"
     primary_color_hex: str | None = None        # e.g., "#007FFF"
     primary_color_family: str | None = None     # e.g., "Blue"
+    primary_shade_code: str | None = None       # e.g., "OLV001" — admin-assigned wool shade code
 
     images: list[str] = []                      # general gallery (no colour)
     colors: list[ColorVariant] = []             # colour-wise images + stock
@@ -108,6 +98,7 @@ class ProductUpdate(BaseModel):
     primary_color_name: str | None = None
     primary_color_hex: str | None = None
     primary_color_family: str | None = None
+    primary_shade_code: str | None = None
 
     images: list[str] | None = None
     colors: list[ColorVariant] | None = None
