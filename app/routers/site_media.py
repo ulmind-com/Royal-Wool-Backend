@@ -77,6 +77,33 @@ SECTIONS: list[SectionSpec] = [
         description="The autoplaying clip carousel.",
         captions=True,
     ),
+    SectionSpec(
+        key="spotlight",
+        label="Spotlight Section",
+        kind="image",
+        slots=1,
+        aspect="3:4 portrait",
+        description="The editorial spotlight card (e.g. 'Spun for softness. Made to last.'). Upload one hero product image.",
+        captions=True,
+    ),
+    SectionSpec(
+        key="range_cards",
+        label="Range Cards",
+        kind="image",
+        slots=3,
+        aspect="16:9 landscape",
+        description="The three scroll-stacking range cards (e.g. Cotton Delight, Cotton Candy, Hobby India). Upload one image per range.",
+        captions=True,
+    ),
+    SectionSpec(
+        key="hero",
+        label="Hero Slider",
+        kind="image",
+        slots=5,
+        aspect="16:9 landscape",
+        description="The full-width hero slider at the top of the home page.",
+        captions=True,
+    ),
 ]
 
 SECTION_KEYS = {s.key for s in SECTIONS}
