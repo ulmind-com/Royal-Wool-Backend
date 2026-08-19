@@ -40,22 +40,41 @@ def _resolve_item_image(prod: dict, color_name: str | None) -> str | None:
 
 
 def _matched_colour_image(prod: dict, color_name: str | None) -> str | None:
-    """Only returns an image when `color_name` exactly matches a colour on
-    `prod` and that colour now has a photo of its own. Never falls back to
-    the product's generic image — used to retroactively refresh what an
-    already-placed order displays (e.g. the admin uploaded the shade's photo
-    after the order was placed) without ever downgrading a stored image that
-    may already be correct.
+    """Only returns an image when `color_name` matches a colour on `prod`
+    and that colour now has a photo of its own. Tries an exact name match
+    first, then — only when that fails — a prefix match (case/space
+    insensitive), because the admin has been known to rename a colour after
+    orders were placed against it (e.g. "Azure Blue" -> "Azure Blue
+    ShadeOLV033"), which breaks an exact match for no reason a customer
+    would understand. The prefix match is only trusted when it identifies
+    exactly one colour; if the old name could plausibly mean more than one
+    of today's colours, this returns None rather than guess.
+
+    Never falls back to the product's generic image — this is used to
+    retroactively refresh what an already-placed order displays, so it must
+    never downgrade a stored image that may already be correct.
     """
     if not color_name:
         return None
-    for c in prod.get("colors") or []:
-        if isinstance(c, dict) and c.get("name") == color_name:
-            if c.get("images"):
-                return c["images"][0]
-            if c.get("swatch_image"):
-                return c["swatch_image"]
-            return None
+    colours = [c for c in (prod.get("colors") or []) if isinstance(c, dict)]
+
+    def _image_of(c: dict) -> str | None:
+        if c.get("images"):
+            return c["images"][0]
+        if c.get("swatch_image"):
+            return c["swatch_image"]
+        return None
+
+    for c in colours:
+        if c.get("name") == color_name:
+            return _image_of(c)
+
+    needle = color_name.strip().lower()
+    if not needle:
+        return None
+    candidates = [c for c in colours if (c.get("name") or "").strip().lower().startswith(needle)]
+    if len(candidates) == 1:
+        return _image_of(candidates[0])
     return None
 
 
