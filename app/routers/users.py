@@ -11,6 +11,14 @@ router = APIRouter(prefix="/users", tags=["users"])
 _REAL_ORDER = ["confirmed", "shipped", "out_for_delivery", "delivered"]
 
 
+@router.get("/admin/count", dependencies=[Depends(require_admin)])
+async def admin_user_count():
+    """Admin dashboard: total signed-up customers (excludes admin/staff accounts)."""
+    db = get_db()
+    count = await db.users.count_documents({"role": {"$ne": "admin"}})
+    return {"count": count}
+
+
 @router.get("/admin/list", dependencies=[Depends(require_admin)])
 async def list_users(q: str | None = None, limit: int = 100):
     """Admin: search users (by name/email) to target a notification."""
