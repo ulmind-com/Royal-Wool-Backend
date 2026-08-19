@@ -20,6 +20,82 @@ from app.services.pricing import (
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
+
+def _resolve_item_image(prod: dict, color_name: str | None) -> str | None:
+    """Return the best image for a specific colour variant.
+
+    Priority: colour variant images[0] → swatch_image → product images[0].
+    Falls back to the product's default hero image when the colour has no
+    dedicated images or when no colour was selected.
+    """
+    if color_name:
+        for c in prod.get("colors") or []:
+            if isinstance(c, dict) and c.get("name") == color_name:
+                if c.get("images"):
+                    return c["images"][0]
+                if c.get("swatch_image"):
+                    return c["swatch_image"]
+                break
+    return (prod.get("images") or [None])[0]
+
+
+def _matched_colour_image(prod: dict, color_name: str | None) -> str | None:
+    """Only returns an image when `color_name` exactly matches a colour on
+    `prod` and that colour now has a photo of its own. Never falls back to
+    the product's generic image — used to retroactively refresh what an
+    already-placed order displays (e.g. the admin uploaded the shade's photo
+    after the order was placed) without ever downgrading a stored image that
+    may already be correct.
+    """
+    if not color_name:
+        return None
+    for c in prod.get("colors") or []:
+        if isinstance(c, dict) and c.get("name") == color_name:
+            if c.get("images"):
+                return c["images"][0]
+            if c.get("swatch_image"):
+                return c["swatch_image"]
+            return None
+    return None
+
+
+def _refresh_item_images(cache: dict, items: list[dict] | None) -> None:
+    """Point each order item's image at its colour's CURRENT photo when one
+    now exists. Only mutates the in-memory dict being sent in a response or
+    rendered into a PDF/email — the stored order document is never written
+    back, so this is safe to call on every read.
+    """
+    for it in items or []:
+        prod = cache.get(it.get("product_id"))
+        if not prod:
+            continue
+        fresh = _matched_colour_image(prod, it.get("color"))
+        if fresh:
+            it["image"] = fresh
+
+
+async def _product_image_cache(db, order_docs: list[dict]) -> dict[str, dict]:
+    """Batch-fetch every product referenced by a set of orders, keyed by id
+    string, so refreshing images for a whole order list costs one query."""
+    ids = {
+        it["product_id"]
+        for d in order_docs
+        for it in (d.get("items") or [])
+        if it.get("product_id")
+    }
+    object_ids = []
+    for pid in ids:
+        try:
+            object_ids.append(to_object_id(pid))
+        except Exception:
+            continue
+    cache: dict[str, dict] = {}
+    if object_ids:
+        async for p in db.products.find({"_id": {"$in": object_ids}}):
+            cache[str(p["_id"])] = p
+    return cache
+
+
 STAGES = ["placed", "confirmed", "shipped", "out_for_delivery", "delivered"]
 
 STATUS_MSG = {
@@ -153,7 +229,7 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
                 "cgst": state["comp"]["cgst"],
                 "sgst": state["comp"]["sgst"],
                 "igst": state["comp"]["igst"],
-                "image": (state["prod"].get("images") or [None])[0],
+                "image": _resolve_item_image(state["prod"], state["it"].color),
             }
         )
 
@@ -364,6 +440,8 @@ async def verify_order(body: OrderVerify, user: dict = Depends(get_current_user)
         # Re-fetch the order to get the updated fields (status, payment_id, paid_at)
         updated_order = await db.orders.find_one({"_id": order["_id"]})
         if updated_order:
+            cache = await _product_image_cache(db, [updated_order])
+            _refresh_item_images(cache, updated_order.get("items"))
             user_doc = await db.users.find_one({"_id": to_object_id(user["id"])})
             email = user_doc.get("email", "") if user_doc else ""
             if email:
@@ -404,7 +482,11 @@ async def my_orders(user: dict = Depends(get_current_user)):
         "user_id": user["id"],
         **_no_ghosts,
     }).sort("created_at", -1).to_list(length=100)
-    return [serialize(d) for d in docs]
+    cache = await _product_image_cache(db, docs)
+    out = [serialize(d) for d in docs]
+    for o in out:
+        _refresh_item_images(cache, o.get("items"))
+    return out
 
 
 @router.get("/admin/status-counts", dependencies=[Depends(require_admin)])
@@ -466,7 +548,11 @@ async def all_orders(
             del query["created_at"]
 
     docs = await db.orders.find(query).sort("created_at", -1).to_list(length=limit)
-    return [serialize(d) for d in docs]
+    cache = await _product_image_cache(db, docs)
+    out = [serialize(d) for d in docs]
+    for o in out:
+        _refresh_item_images(cache, o.get("items"))
+    return out
 
 
 @router.get("/admin/refunds", dependencies=[Depends(require_admin)])
@@ -546,6 +632,9 @@ async def order_invoice(order_id: str, user: dict = Depends(get_current_user)):
     if not doc or (doc["user_id"] != user["id"] and user.get("role") != "admin"):
         raise HTTPException(status_code=404, detail="Order not found")
 
+    cache = await _product_image_cache(db, [doc])
+    _refresh_item_images(cache, doc.get("items"))
+
     from app.services.invoice_template import render_pdf
     from io import BytesIO
     from xhtml2pdf import pisa
@@ -576,7 +665,10 @@ async def get_order(order_id: str, user: dict = Depends(get_current_user)):
     doc = await db.orders.find_one({"_id": to_object_id(order_id)})
     if not doc or (doc["user_id"] != user["id"] and user.get("role") != "admin"):
         raise HTTPException(status_code=404, detail="Order not found")
-    return serialize(doc)
+    cache = await _product_image_cache(db, [doc])
+    out = serialize(doc)
+    _refresh_item_images(cache, out.get("items"))
+    return out
 
 
 @router.patch("/{order_id}/status", dependencies=[Depends(require_admin)])
