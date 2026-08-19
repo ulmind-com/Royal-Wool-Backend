@@ -22,20 +22,16 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 
 
 def _resolve_item_image(prod: dict, color_name: str | None) -> str | None:
-    """Return the best image for a specific colour variant.
-
-    Priority: colour variant images[0] → swatch_image → product images[0].
-    Falls back to the product's default hero image when the colour has no
-    dedicated images or when no colour was selected.
+    """Return the best image for a specific colour variant at order-creation
+    time. Tries an exact/prefix colour match first (see
+    `_matched_colour_image` — this also protects a checkout whose cart was
+    added to before the admin renamed a colour), falling back to the
+    product's default hero image when no colour was selected or none of
+    today's colours can confidently be matched to it.
     """
-    if color_name:
-        for c in prod.get("colors") or []:
-            if isinstance(c, dict) and c.get("name") == color_name:
-                if c.get("images"):
-                    return c["images"][0]
-                if c.get("swatch_image"):
-                    return c["swatch_image"]
-                break
+    matched = _matched_colour_image(prod, color_name)
+    if matched:
+        return matched
     return (prod.get("images") or [None])[0]
 
 
