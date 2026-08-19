@@ -20,6 +20,24 @@ from app.services.pricing import (
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
+
+def _resolve_item_image(prod: dict, color_name: str | None) -> str | None:
+    """Return the best image for a specific colour variant.
+
+    Priority: colour variant images[0] → swatch_image → product images[0].
+    Falls back to the product's default hero image when the colour has no
+    dedicated images or when no colour was selected.
+    """
+    if color_name:
+        for c in prod.get("colors") or []:
+            if isinstance(c, dict) and c.get("name") == color_name:
+                if c.get("images"):
+                    return c["images"][0]
+                if c.get("swatch_image"):
+                    return c["swatch_image"]
+                break
+    return (prod.get("images") or [None])[0]
+
 STAGES = ["placed", "confirmed", "shipped", "out_for_delivery", "delivered"]
 
 STATUS_MSG = {
@@ -153,7 +171,7 @@ async def _build_bill(db, items_in, address, coupon, user_id=None):
                 "cgst": state["comp"]["cgst"],
                 "sgst": state["comp"]["sgst"],
                 "igst": state["comp"]["igst"],
-                "image": (state["prod"].get("images") or [None])[0],
+                "image": _resolve_item_image(state["prod"], state["it"].color),
             }
         )
 
