@@ -1,3 +1,6 @@
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from app.db.mongodb import get_db
@@ -10,13 +13,31 @@ router = APIRouter(prefix="/users", tags=["users"])
 # lifetime stats — abandoned online orders (status "placed") are excluded.
 _REAL_ORDER = ["confirmed", "shipped", "out_for_delivery", "delivered"]
 
+_ONLINE_WINDOW = timedelta(minutes=5)
+_IST = ZoneInfo("Asia/Kolkata")
+
 
 @router.get("/admin/count", dependencies=[Depends(require_admin)])
 async def admin_user_count():
-    """Admin dashboard: total signed-up customers (excludes admin/staff accounts)."""
+    """Admin dashboard: total signed-up customers, how many are active right
+    now, and how many signed up today (IST calendar day) — all excluding
+    admin/staff accounts.
+    """
     db = get_db()
+    now = datetime.now(timezone.utc)
+    today_ist_start = datetime.now(_IST).replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start_utc = today_ist_start.astimezone(timezone.utc)
+
     count = await db.users.count_documents({"role": {"$ne": "admin"}})
-    return {"count": count}
+    online_now = await db.users.count_documents({
+        "role": {"$ne": "admin"},
+        "last_active_at": {"$gte": now - _ONLINE_WINDOW},
+    })
+    new_today = await db.users.count_documents({
+        "role": {"$ne": "admin"},
+        "created_at": {"$gte": today_start_utc},
+    })
+    return {"count": count, "online_now": online_now, "new_today": new_today}
 
 
 @router.get("/admin/list", dependencies=[Depends(require_admin)])
