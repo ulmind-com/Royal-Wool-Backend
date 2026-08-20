@@ -651,8 +651,9 @@ async def export_orders(
 
     items_ws = wb.create_sheet("Order Items")
     items_headers = [
-        "Order ID", "Date Placed", "Customer Name", "Phone",
-        "Product Title", "Shade / Colour", "Size", "Qty", "Unit Price", "Line Total",
+        "Order ID", "Date Placed", "Customer Name", "Phone", "Delivery Address",
+        "Product ID", "Product Title", "Shade / Colour", "Size", "Qty",
+        "Unit Price", "Line Total", "Image URL",
     ]
     items_ws.append(items_headers)
     for cell in items_ws[1]:
@@ -684,9 +685,12 @@ async def export_orders(
 
         for it in items:
             items_ws.append([
-                oid, placed, name, phone,
-                (it.get("title") or "").strip(), it.get("color") or "", it.get("size") or "",
-                it.get("qty", 0), it.get("price", 0), round((it.get("price") or 0) * (it.get("qty") or 0), 2),
+                oid, placed, name, phone, full_address,
+                str(it.get("product_id") or ""), (it.get("title") or "").strip(),
+                it.get("color") or "", it.get("size") or "",
+                it.get("qty", 0), it.get("price", 0),
+                round((it.get("price") or 0) * (it.get("qty") or 0), 2),
+                it.get("image") or "",
             ])
 
     for ws, headers in ((orders_ws, orders_headers), (items_ws, items_headers)):
