@@ -517,25 +517,24 @@ async def admin_status_counts():
     return {s: counts.get(s, 0) for s in all_stages}
 
 
-@router.get("/admin/all", dependencies=[Depends(require_admin)])
-async def all_orders(
-    status: str | None = None,
-    q: str | None = None,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    user_id: str | None = None,
-    limit: int = 100
-):
-    db = get_db()
+def _orders_query(
+    status: str | None,
+    q: str | None,
+    start_date: str | None,
+    end_date: str | None,
+    user_id: str | None,
+) -> dict:
+    """Shared filter-building for every admin orders listing (table view,
+    Excel export, ...) so they can never quietly drift apart."""
     # Exclude ghost orders: online orders where payment was never completed.
     query: dict = {"$nor": [{"payment_method": "online", "razorpay_payment_id": None}]}
-    
+
     if user_id:
         query["user_id"] = user_id
 
     if status:
         query["status"] = status
-        
+
     if q:
         q = q.strip()
         search_val = q.lstrip("#")
@@ -544,7 +543,7 @@ async def all_orders(
             {"address.phone": {"$regex": re.escape(search_val), "$options": "i"}},
             {"$expr": {"$regexMatch": {"input": {"$toString": "$_id"}, "regex": re.escape(search_val), "options": "i"}}}
         ]
-            
+
     if start_date or end_date:
         query["created_at"] = {}
         if start_date:
@@ -562,12 +561,150 @@ async def all_orders(
         if not query["created_at"]:
             del query["created_at"]
 
+    return query
+
+
+@router.get("/admin/all", dependencies=[Depends(require_admin)])
+async def all_orders(
+    status: str | None = None,
+    q: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    user_id: str | None = None,
+    limit: int = 100
+):
+    db = get_db()
+    query = _orders_query(status, q, start_date, end_date, user_id)
     docs = await db.orders.find(query).sort("created_at", -1).to_list(length=limit)
     cache = await _product_image_cache(db, docs)
     out = [serialize(d) for d in docs]
     for o in out:
         _refresh_item_images(cache, o.get("items"))
     return out
+
+
+def _short_id(oid) -> str:
+    return f"#{str(oid)[-6:].upper()}"
+
+
+def _fmt_dt(value) -> str:
+    if not value:
+        return ""
+    return value.strftime("%d %b %Y, %I:%M %p")
+
+
+def _payment_status(o: dict) -> str:
+    if o.get("payment_method") == "online":
+        return "Paid" if o.get("razorpay_payment_id") else "Unpaid"
+    return (o.get("payment_method") or "").upper()
+
+
+@router.get("/admin/export", dependencies=[Depends(require_admin)])
+async def export_orders(
+    status: str | None = None,
+    q: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    user_id: str | None = None,
+):
+    """Admin: download every order matching the current filters as a
+    two-sheet Excel workbook (order summary + line-item detail). Read-only —
+    touches nothing in the database.
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    from fastapi.responses import StreamingResponse
+    from io import BytesIO
+
+    db = get_db()
+    query = _orders_query(status, q, start_date, end_date, user_id)
+    docs = await db.orders.find(query).sort("created_at", -1).to_list(length=5000)
+
+    user_ids = {d["user_id"] for d in docs if d.get("user_id")}
+    emails: dict[str, str] = {}
+    if user_ids:
+        object_ids = []
+        for uid in user_ids:
+            try:
+                object_ids.append(to_object_id(uid))
+            except Exception:
+                continue
+        if object_ids:
+            async for u in db.users.find({"_id": {"$in": object_ids}}, {"email": 1}):
+                emails[str(u["_id"])] = u.get("email", "")
+
+    wb = Workbook()
+    bold = Font(bold=True)
+
+    orders_ws = wb.active
+    orders_ws.title = "Orders"
+    orders_headers = [
+        "Order ID", "Full Order ID", "Date Placed", "Paid At", "Status",
+        "Payment Method", "Payment Status", "Customer Name", "Phone", "Email",
+        "Delivery Address", "Item Count", "Items Summary",
+        "Subtotal", "Discount", "Delivery Fee", "Tax", "Total",
+        "Coupon Code", "Tracking ID", "Tracking URL",
+    ]
+    orders_ws.append(orders_headers)
+    for cell in orders_ws[1]:
+        cell.font = bold
+
+    items_ws = wb.create_sheet("Order Items")
+    items_headers = [
+        "Order ID", "Date Placed", "Customer Name", "Phone",
+        "Product Title", "Shade / Colour", "Size", "Qty", "Unit Price", "Line Total",
+    ]
+    items_ws.append(items_headers)
+    for cell in items_ws[1]:
+        cell.font = bold
+
+    for d in docs:
+        oid = _short_id(d["_id"])
+        placed = _fmt_dt(d.get("created_at"))
+        addr = d.get("address") or {}
+        name = addr.get("name", "")
+        phone = addr.get("phone", "")
+        email = emails.get(d.get("user_id"), "")
+        full_address = ", ".join(
+            p for p in [addr.get("house"), addr.get("area"), addr.get("city"), addr.get("state"), addr.get("pincode")] if p
+        )
+        items = d.get("items") or []
+        items_summary = "; ".join(
+            f"{it.get('qty', 0)}x {(it.get('title') or '').strip()}" + (f" ({it.get('color')})" if it.get("color") else "")
+            for it in items
+        )
+
+        orders_ws.append([
+            oid, str(d["_id"]), placed, _fmt_dt(d.get("paid_at")), d.get("status", ""),
+            d.get("payment_method", ""), _payment_status(d), name, phone, email,
+            full_address, len(items), items_summary,
+            d.get("subtotal", 0), d.get("discount", 0), d.get("delivery", 0), d.get("tax", 0), d.get("amount", 0),
+            d.get("coupon_code") or "", d.get("tracking_id") or "", d.get("tracking_url") or "",
+        ])
+
+        for it in items:
+            items_ws.append([
+                oid, placed, name, phone,
+                (it.get("title") or "").strip(), it.get("color") or "", it.get("size") or "",
+                it.get("qty", 0), it.get("price", 0), round((it.get("price") or 0) * (it.get("qty") or 0), 2),
+            ])
+
+    for ws, headers in ((orders_ws, orders_headers), (items_ws, items_headers)):
+        for i, header in enumerate(headers, start=1):
+            ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = max(12, min(40, len(header) + 4))
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+
+    label = start_date[:10] if start_date else "all"
+    if end_date and end_date[:10] != label:
+        label += f"_to_{end_date[:10]}"
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="Orders_Royal_Wool_{label}.xlsx"'},
+    )
 
 
 @router.get("/admin/refunds", dependencies=[Depends(require_admin)])
