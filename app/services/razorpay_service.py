@@ -50,3 +50,18 @@ def verify_signature(order_id: str, payment_id: str, signature: str) -> bool:
         return True
     except razorpay.errors.SignatureVerificationError:
         return False
+
+
+def verify_webhook_signature(payload: str, signature: str) -> bool:
+    """Verify an incoming Razorpay webhook call is genuinely from Razorpay.
+    `payload` must be the exact raw request body string (not a re-serialized
+    copy) — the signature is computed over those exact bytes.
+    """
+    if not settings.RAZORPAY_WEBHOOK_SECRET:
+        return False
+    client = _get_client()
+    try:
+        client.utility.verify_webhook_signature(payload, signature, settings.RAZORPAY_WEBHOOK_SECRET)
+        return True
+    except razorpay.errors.SignatureVerificationError:
+        return False
