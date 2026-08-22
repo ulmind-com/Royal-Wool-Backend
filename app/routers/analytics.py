@@ -10,8 +10,13 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 @router.get("/dashboard", dependencies=[Depends(require_admin)])
 async def get_dashboard_analytics():
     db = get_db()
-    # Total Revenue & Orders (from non-cancelled orders)
-    orders = await db.orders.find({"status": {"$ne": "cancelled"}}).to_list(length=10000)
+    # Total Revenue & Orders — excludes cancelled orders AND "ghost" online
+    # orders that were never actually paid (razorpay_payment_id never set,
+    # e.g. an abandoned checkout). Same exclusion already used by
+    # /orders/admin/all and /orders (my_orders) — keeps every admin-facing
+    # number consistent with what a real, paid order means.
+    no_ghosts = {"$nor": [{"payment_method": "online", "razorpay_payment_id": None}]}
+    orders = await db.orders.find({"status": {"$ne": "cancelled"}, **no_ghosts}).to_list(length=10000)
     
     total_revenue = 0.0
     total_orders = len(orders)
