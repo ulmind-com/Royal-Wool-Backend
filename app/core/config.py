@@ -18,6 +18,10 @@ class Settings(BaseSettings):
 
     RAZORPAY_KEY_ID: str = ""
     RAZORPAY_KEY_SECRET: str = ""
+    # Set once a webhook is created in the Razorpay Dashboard (payment.captured
+    # -> https://<backend>/orders/webhook/razorpay). Empty = webhook stays
+    # dormant (ignores calls) instead of erroring, so it's safe to deploy first.
+    RAZORPAY_WEBHOOK_SECRET: str = ""
 
     CLOUDINARY_CLOUD_NAME: str = ""
     CLOUDINARY_API_KEY: str = ""

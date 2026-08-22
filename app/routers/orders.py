@@ -1,7 +1,9 @@
+import asyncio
+import json
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from app.core.config import settings as app_settings
@@ -422,6 +424,70 @@ async def create_order(body: OrderCreate, user: dict = Depends(get_current_user)
     }
 
 
+async def _mark_order_paid(db, order_id_str: str, razorpay_payment_id: str) -> dict | None:
+    """Atomically transition an order to 'placed' exactly once, no matter how
+    many times (or from where — client verify, webhook, webhook retries, or
+    both racing) this is called for the same order.
+
+    Returns the updated order doc only when THIS call performed the
+    transition; None means some other call already handled it — callers must
+    treat that as a normal success, not an error, and must NOT re-run stock/
+    coupon/email side effects.
+
+    Matches status != "placed" (not just "pending_payment") on purpose: if
+    Razorpay confirms a real capture for an order that had been marked
+    "cancelled" (e.g. a past signature-check edge case), that's still real
+    money the customer paid — it should still be fulfilled, not left
+    cancelled.
+    """
+    updated = await db.orders.find_one_and_update(
+        {"_id": to_object_id(order_id_str), "status": {"$ne": "placed"}},
+        {"$set": {
+            "status": "placed",
+            "razorpay_payment_id": razorpay_payment_id,
+            "paid_at": datetime.now(timezone.utc),
+        }},
+        return_document=True,
+    )
+    if not updated:
+        return None
+    await _decrement_stock(db, updated["items"])
+    if updated.get("coupon_code"):
+        await db.coupons.update_one(
+            {"code": updated["coupon_code"].strip().upper()}, {"$inc": {"used_count": 1}}
+        )
+    return updated
+
+
+async def _send_invoice_email_safely(db, order_doc: dict) -> None:
+    """Best-effort invoice email with PDF attachment — never raises, so it's
+    safe to call from a background task (webhook) or inline (client verify).
+    """
+    try:
+        from app.services.email_service import send_invoice_email
+        from app.services.invoice_template import render_pdf
+        from io import BytesIO
+        from xhtml2pdf import pisa
+
+        cache = await _product_image_cache(db, [order_doc])
+        _refresh_item_images(cache, order_doc.get("items"))
+        user_doc = await db.users.find_one({"_id": to_object_id(order_doc["user_id"])})
+        email = user_doc.get("email", "") if user_doc else ""
+        if not email:
+            return
+        pdf_bytes = None
+        try:
+            html_str = render_pdf(order_doc)
+            buf = BytesIO()
+            pisa.CreatePDF(html_str, dest=buf)
+            pdf_bytes = buf.getvalue()
+        except Exception as pe:
+            print(f"[invoice-pdf] generation failed: {pe}")
+        send_invoice_email(email, order_doc, pdf_bytes)
+    except Exception as e:
+        print(f"[invoice-email] failed to send: {e}")
+
+
 @router.post("/verify")
 async def verify_order(body: OrderVerify, user: dict = Depends(get_current_user)):
     db = get_db()
@@ -433,47 +499,62 @@ async def verify_order(body: OrderVerify, user: dict = Depends(get_current_user)
         body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature
     )
     if not ok:
-        await db.orders.update_one({"_id": order["_id"]}, {"$set": {"status": "cancelled"}})
+        if order.get("status") != "placed":
+            await db.orders.update_one({"_id": order["_id"]}, {"$set": {"status": "cancelled"}})
         raise HTTPException(status_code=400, detail="Payment verification failed")
 
-    await db.orders.update_one(
-        {"_id": order["_id"]},
-        {"$set": {"status": "placed", "razorpay_payment_id": body.razorpay_payment_id,
-                  "paid_at": datetime.now(timezone.utc)}},
-    )
-    await _decrement_stock(db, order["items"])
-    if order.get("coupon_code"):
-        await db.coupons.update_one({"code": order["coupon_code"].strip().upper()}, {"$inc": {"used_count": 1}})
-
-    # Send invoice email with PDF attachment (non-blocking — don't fail the response)
-    try:
-        from app.services.email_service import send_invoice_email
-        from app.services.invoice_template import render_pdf
-        from io import BytesIO
-        from xhtml2pdf import pisa
-
-        # Re-fetch the order to get the updated fields (status, payment_id, paid_at)
-        updated_order = await db.orders.find_one({"_id": order["_id"]})
-        if updated_order:
-            cache = await _product_image_cache(db, [updated_order])
-            _refresh_item_images(cache, updated_order.get("items"))
-            user_doc = await db.users.find_one({"_id": to_object_id(user["id"])})
-            email = user_doc.get("email", "") if user_doc else ""
-            if email:
-                # Generate PDF bytes for attachment
-                pdf_bytes = None
-                try:
-                    html_str = render_pdf(updated_order)
-                    buf = BytesIO()
-                    pisa.CreatePDF(html_str, dest=buf)
-                    pdf_bytes = buf.getvalue()
-                except Exception as pe:
-                    print(f"[invoice-pdf] generation failed: {pe}")
-                send_invoice_email(email, updated_order, pdf_bytes)
-    except Exception as e:
-        print(f"[invoice-email] failed to send: {e}")
+    updated = await _mark_order_paid(db, str(order["_id"]), body.razorpay_payment_id)
+    if updated:
+        await _send_invoice_email_safely(db, updated)
+    # updated is None when the webhook (or a retry of this same call) already
+    # confirmed this order — still a success from the customer's perspective.
 
     return {"status": "confirmed", "order_id": body.order_id}
+
+
+@router.post("/webhook/razorpay")
+async def razorpay_webhook(request: Request):
+    """Server-to-server payment confirmation from Razorpay itself — the
+    reliable counterpart to /orders/verify, which depends on the customer's
+    own browser still being alive right after payment. No auth dependency:
+    Razorpay calls this directly, so authenticity comes from the signature,
+    not a JWT. See _mark_order_paid for why this is safe to fire alongside
+    (or instead of) the client-side path.
+    """
+    raw_body = await request.body()
+    signature = request.headers.get("X-Razorpay-Signature", "")
+
+    if not app_settings.RAZORPAY_WEBHOOK_SECRET:
+        # Not wired up in the Razorpay Dashboard yet on this deploy — stay
+        # dormant rather than error, so nothing retry-storms an endpoint that
+        # isn't configured.
+        return {"status": "ignored"}
+
+    if not razorpay_service.verify_webhook_signature(raw_body.decode("utf-8"), signature):
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    payload = json.loads(raw_body)
+    if payload.get("event") != "payment.captured":
+        return {"status": "ignored", "event": payload.get("event")}
+
+    entity = ((payload.get("payload") or {}).get("payment") or {}).get("entity") or {}
+    rp_order_id = entity.get("order_id")
+    payment_id = entity.get("id")
+    if not rp_order_id or not payment_id:
+        return {"status": "ignored", "reason": "missing order/payment id"}
+
+    db = get_db()
+    order = await db.orders.find_one({"razorpay_order_id": rp_order_id})
+    if not order:
+        return {"status": "ignored", "reason": "no matching order"}
+
+    updated = await _mark_order_paid(db, str(order["_id"]), payment_id)
+    if updated:
+        # Fire-and-forget: Razorpay wants a fast response, the email can take
+        # a moment (PDF render + send).
+        asyncio.create_task(_send_invoice_email_safely(db, updated))
+
+    return {"status": "ok"}
 
 
 
